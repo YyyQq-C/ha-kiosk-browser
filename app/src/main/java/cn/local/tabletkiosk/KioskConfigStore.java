@@ -1,0 +1,98 @@
+package cn.local.tabletkiosk;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import java.security.SecureRandom;
+import java.util.Locale;
+
+/** 在应用私有 SharedPreferences 中读写配置；密码只保存在本机，不写入日志。 */
+public final class KioskConfigStore {
+    private static final String PREFS = "kiosk_config";
+    private static final String DEVICE_ID = "device_id";
+    private static final String BATTERY_PROMPTED = "battery_prompted";
+    private final SharedPreferences prefs;
+
+    /** 绑定应用私有配置文件。 */
+    public KioskConfigStore(Context context) {
+        prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** 读取配置，缺失项使用默认值。 */
+    public KioskConfig load() {
+        KioskConfig d = KioskConfig.defaults();
+        KioskConfig.Builder b = d.toBuilder();
+        b.homeUrl = prefs.getString(ConfigForm.HOME_URL, d.homeUrl);
+        b.idleReloadHours = prefs.getInt(ConfigForm.IDLE_RELOAD_HOURS, d.idleReloadHours);
+        b.retrySeconds = prefs.getInt(ConfigForm.RETRY_SECONDS, d.retrySeconds);
+        b.watchBrightness = prefs.getInt(ConfigForm.WATCH_BRIGHTNESS, d.watchBrightness);
+        b.standbyBrightness = prefs.getInt(ConfigForm.STANDBY_BRIGHTNESS, d.standbyBrightness);
+        b.dimDelaySeconds = prefs.getInt(ConfigForm.DIM_DELAY_SECONDS, d.dimDelaySeconds);
+        b.motionEnabled = prefs.getBoolean("motion_enabled", d.motionEnabled);
+        b.motionSensitivity = prefs.getInt(ConfigForm.MOTION_SENSITIVITY, d.motionSensitivity);
+        b.presenceHoldSeconds = prefs.getInt(ConfigForm.PRESENCE_HOLD_SECONDS, d.presenceHoldSeconds);
+        b.mqttEnabled = prefs.getBoolean("mqtt_enabled", d.mqttEnabled);
+        b.mqttHost = prefs.getString(ConfigForm.MQTT_HOST, d.mqttHost);
+        b.mqttPort = prefs.getInt(ConfigForm.MQTT_PORT, d.mqttPort);
+        b.mqttUsername = prefs.getString(ConfigForm.MQTT_USERNAME, d.mqttUsername);
+        b.mqttPassword = prefs.getString(ConfigForm.MQTT_PASSWORD, d.mqttPassword);
+        b.mqttBaseTopic = prefs.getString(ConfigForm.MQTT_BASE_TOPIC, d.mqttBaseTopic);
+        b.mqttDiscoveryPrefix = prefs.getString(ConfigForm.MQTT_DISCOVERY_PREFIX, d.mqttDiscoveryPrefix);
+        b.mqttStateIntervalSeconds = prefs.getInt(ConfigForm.MQTT_STATE_INTERVAL, d.mqttStateIntervalSeconds);
+        b.lanEnabled = prefs.getBoolean("lan_enabled", d.lanEnabled);
+        b.lanPort = prefs.getInt(ConfigForm.LAN_PORT, d.lanPort);
+        b.lanPassword = prefs.getString(ConfigForm.LAN_PASSWORD, d.lanPassword);
+        b.lockTaskEnabled = prefs.getBoolean("lock_task_enabled", d.lockTaskEnabled);
+        return b.build();
+    }
+
+    /** 同步写入全部配置，保证随后读取到的是新值。 */
+    public void save(KioskConfig c) {
+        boolean ok = prefs.edit()
+                .putString(ConfigForm.HOME_URL, c.homeUrl)
+                .putInt(ConfigForm.IDLE_RELOAD_HOURS, c.idleReloadHours)
+                .putInt(ConfigForm.RETRY_SECONDS, c.retrySeconds)
+                .putInt(ConfigForm.WATCH_BRIGHTNESS, c.watchBrightness)
+                .putInt(ConfigForm.STANDBY_BRIGHTNESS, c.standbyBrightness)
+                .putInt(ConfigForm.DIM_DELAY_SECONDS, c.dimDelaySeconds)
+                .putBoolean("motion_enabled", c.motionEnabled)
+                .putInt(ConfigForm.MOTION_SENSITIVITY, c.motionSensitivity)
+                .putInt(ConfigForm.PRESENCE_HOLD_SECONDS, c.presenceHoldSeconds)
+                .putBoolean("mqtt_enabled", c.mqttEnabled)
+                .putString(ConfigForm.MQTT_HOST, c.mqttHost)
+                .putInt(ConfigForm.MQTT_PORT, c.mqttPort)
+                .putString(ConfigForm.MQTT_USERNAME, c.mqttUsername)
+                .putString(ConfigForm.MQTT_PASSWORD, c.mqttPassword)
+                .putString(ConfigForm.MQTT_BASE_TOPIC, c.mqttBaseTopic)
+                .putString(ConfigForm.MQTT_DISCOVERY_PREFIX, c.mqttDiscoveryPrefix)
+                .putInt(ConfigForm.MQTT_STATE_INTERVAL, c.mqttStateIntervalSeconds)
+                .putBoolean("lan_enabled", c.lanEnabled)
+                .putInt(ConfigForm.LAN_PORT, c.lanPort)
+                .putString(ConfigForm.LAN_PASSWORD, c.lanPassword)
+                .putBoolean("lock_task_enabled", c.lockTaskEnabled)
+                .commit();
+        if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist kiosk config");
+    }
+
+    /** 返回本机固定的设备编号，首次调用时随机生成，用于 MQTT 主题和实体唯一 ID。 */
+    public synchronized String deviceId() {
+        String id = prefs.getString(DEVICE_ID, null);
+        if (id != null) return id;
+        byte[] bytes = new byte[4];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder sb = new StringBuilder("kiosk_");
+        for (byte b : bytes) sb.append(String.format(Locale.ROOT, "%02x", b));
+        id = sb.toString();
+        prefs.edit().putString(DEVICE_ID, id).apply();
+        return id;
+    }
+
+    /** 电池优化提示是否已弹出过，只在首次运行主动提示一次。 */
+    public boolean batteryPrompted() {
+        return prefs.getBoolean(BATTERY_PROMPTED, false);
+    }
+
+    /** 记录电池优化提示已弹出。 */
+    public void markBatteryPrompted() {
+        prefs.edit().putBoolean(BATTERY_PROMPTED, true).apply();
+    }
+}
