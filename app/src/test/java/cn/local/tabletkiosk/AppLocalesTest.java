@@ -15,4 +15,15 @@ public class AppLocalesTest {
         assertEquals(AppLocales.ZH, AppLocales.choose("", "zh"));
         assertEquals(AppLocales.ZH, AppLocales.choose(null, "fr"));
     }
+
+    /** 一个按钮从当前有效语言切到另一种，并显示当前语言。 */
+    @Test
+    public void toggleAndLabelFollowCurrentLanguage() {
+        assertEquals(AppLocales.EN, AppLocales.toggle(AppLocales.ZH));
+        assertEquals(AppLocales.ZH, AppLocales.toggle(AppLocales.EN));
+        assertEquals(AppLocales.EN, AppLocales.toggle(""));
+        assertEquals("中文", AppLocales.buttonLabel(AppLocales.ZH));
+        assertEquals("EN", AppLocales.buttonLabel(AppLocales.EN));
+        assertEquals("中文", AppLocales.buttonLabel(""));
+    }
 }
