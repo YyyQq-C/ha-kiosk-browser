@@ -13,8 +13,8 @@ android {
         applicationId 'cn.local.tabletkiosk'
         minSdk 30
         targetSdk 36
-        versionCode 31
-        versionName '1.0.30'
+        versionCode 32
+        versionName '1.0.31'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
