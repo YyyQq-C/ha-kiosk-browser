@@ -39,6 +39,8 @@ import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -130,6 +132,7 @@ public final class MainActivity extends ComponentActivity
     private PowerManager power;
     private EdgeSwipeLayout edge;
     private SettingsPanel settings;
+    private TopPullRefreshLayout refresh;
     private WebView web;
     private TextView notice;
     private TextToSpeech tts;
@@ -306,8 +309,13 @@ public final class MainActivity extends ComponentActivity
 
     /** 创建或重建网页视图；网页渲染进程崩溃后也走这里。 */
     private void createWebView() {
+        if (refresh != null) {
+            edge.removeView(refresh);
+            refresh = null;
+        }
         if (web != null) {
-            edge.removeView(web);
+            ViewParent parent = web.getParent();
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(web);
             web.destroy();
         }
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
@@ -335,9 +343,33 @@ public final class MainActivity extends ComponentActivity
         web.setOnLongClickListener(v -> true);
         web.setWebViewClient(new KioskWebClient());
         web.setWebChromeClient(new WebChromeClient());
-        edge.addView(web, 0, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+        refresh = new TopPullRefreshLayout(this);
+        refresh.setListener(this::pullToRefresh);
+        refresh.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        edge.addView(refresh, 0, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
         edge.setTapTarget(web);
+        syncPullRefresh();
+    }
+
+    /** 从画面顶部下拉时清缓存并重新加载当前页，不改已保存的首页。 */
+    private void pullToRefresh() {
+        Log.i(KioskApp.LOG, "Pull to refresh");
+        reload();
+    }
+
+    /** 设置或密码层打开时不响应下拉。 */
+    private void syncPullRefresh() {
+        if (refresh == null) return;
+        boolean blocked = (settings != null && settings.isOpen()) || !pinClosed();
+        refresh.setEnabled(!blocked);
+        if (blocked) refresh.setRefreshing(false);
+    }
+
+    /** 页面加载结束或失败后收起下拉指示。 */
+    private void stopPullRefresh() {
+        if (refresh != null) refresh.setRefreshing(false);
     }
 
     /** 网页加载回调：记录当前网址、失败重试和渲染进程恢复。 */
@@ -371,6 +403,7 @@ public final class MainActivity extends ComponentActivity
                 watchdog.onPageFinished(SystemClock.elapsedRealtime());
             }
             view.evaluateJavascript(LOCK_JS, null);
+            stopPullRefresh();
             if (purgeOnNextFinish) {
                 purgeOnNextFinish = false;
                 purgeThenLoad(current.isEmpty() ? config.homeUrl : current);
@@ -416,6 +449,7 @@ public final class MainActivity extends ComponentActivity
     /** 记录失败并在设定秒数后重试；秒数为 0 时不重试。 */
     private void onLoadFailure(String reason) {
         mainFrameError = true;
+        stopPullRefresh();
         Log.w(KioskApp.LOG, reason);
         if (config.retrySeconds <= 0 || retryPending) return;
         retryPending = true;
@@ -571,6 +605,7 @@ public final class MainActivity extends ComponentActivity
             settings.show();
             syncCamera();
         }
+        syncPullRefresh();
     }
 
     /** 摄像头检测到画面变化：标记有人；屏幕已熄时点亮。 */
@@ -947,6 +982,7 @@ public final class MainActivity extends ComponentActivity
         InputMethodManager imm = getSystemService(InputMethodManager.class);
         if (imm != null && pinInput != null) imm.hideSoftInputFromWindow(pinInput.getWindowToken(), 0);
         if (settings == null || !settings.isOpen()) edge.setEdgeEnabled(true);
+        syncPullRefresh();
     }
 
     /** 显示密码层。 */
@@ -955,6 +991,7 @@ public final class MainActivity extends ComponentActivity
         pinInput.setError(null);
         pinGate.setVisibility(View.VISIBLE);
         pinInput.requestFocus();
+        syncPullRefresh();
     }
 
     /** dp 转像素。 */
@@ -1016,6 +1053,7 @@ public final class MainActivity extends ComponentActivity
     @Override
     public void onPanelClosed() {
         edge.setEdgeEnabled(true);
+        syncPullRefresh();
         hideSystemBars();
         syncCamera();
     }
