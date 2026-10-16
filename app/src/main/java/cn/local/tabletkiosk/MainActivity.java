@@ -347,6 +347,9 @@ public final class MainActivity extends ComponentActivity
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         s.setTextZoom(100);
+        // 让页面的 viewport 按设备宽度排版，固定画布才能缩进可见区域
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(false);
         // 不使用 HTTP 缓存，避免 HA 前端更新后仍显示旧界面
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         CookieManager.getInstance().setAcceptCookie(true);
