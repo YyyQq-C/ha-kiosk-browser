@@ -357,6 +357,11 @@ final class SettingsPanel extends FrameLayout {
         header.addView(closeButton);
         form.addView(header);
 
+        TextView openHint = text(context, context.getString(R.string.settings_open_hint), 13, MUTED, false);
+        openHint.setLineSpacing(dp(3), 1f);
+        openHint.setPadding(dp(2), dp(8), dp(2), dp(4));
+        form.addView(openHint, fullWidth());
+
         statusGrid = new LinearLayout(context);
         statusGrid.setOrientation(LinearLayout.VERTICAL);
         card(context).addView(statusGrid);

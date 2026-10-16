@@ -9,7 +9,8 @@
     <string name="close">Close</string>
     <string name="section_page">Page</string>
     <string name="home_url">Home URL</string>
-    <string name="setup_hint">On first launch, enter the Home Assistant address. Brightness, sound, and connections can be changed here too. Then tap Start.</string>
+    <string name="setup_hint">On first launch, enter the Home Assistant address. Brightness, sound, and connections can be changed here too. Then tap Start. Afterwards, swipe right from the left edge of the screen to open this page again.</string>
+    <string name="settings_open_hint">Swipe right from the left edge of the screen to open this page again. Start on the left edge and move right. If a settings password is set, enter it after the swipe. Tap outside this panel, or swipe left on it, to close.</string>
     <string name="setup_url_hint">https://your-home:8123/</string>
     <string name="setup_start">Start</string>
     <string name="idle_reload">Reload after idle (hours, 0 off)</string>
