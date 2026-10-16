@@ -10,7 +10,7 @@ Repository: [ha-kiosk-browser](https://github.com/YyyQq-C/ha-kiosk-browser)
 
 HAPanel is a full-screen Android web app that keeps a Home Assistant page on a tablet. The Chinese display name is HA 智能面板. The English display name is HAPanel.
 
-The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.27 and `versionCode` 28, as set in `app/build.gradle`.
+The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.29 and `versionCode` 30, as set in `app/build.gradle`.
 
 ## Who it is for
 
@@ -31,7 +31,7 @@ Development was checked against a Lenovo Xiaoxin Pad 2022 (TB128FU, Android 12).
 - Status includes CPU, memory, low memory, storage, app memory, and battery temperature. CPU use needs two `/proc/stat` samples. The first read at startup is only a counter. A percentage appears on the second sample about 5 seconds later, then about once a minute.
 - MQTT with Home Assistant discovery and the LAN admin API stay online in a foreground service.
 - The app starts after boot and after it is updated.
-- The settings title offers 中文 / EN. Until a language is chosen, the app follows the system: English when the system language is English, otherwise Simplified Chinese. After a choice, it stays on Simplified Chinese or English and refreshes the MQTT entity names.
+- The settings title has one language button. It shows 中文 on the Chinese screen and EN on the English screen. A tap switches to the other language. Until a language is chosen, the app follows the system: English when the system language is English, otherwise Simplified Chinese. A choice is saved and updates only the open settings panel. It does not recreate the activity, reload the page, or refresh the foreground notification or MQTT discovery. The main screen and speech keep the language from this launch until the next start.
 
 The app does not provide remote click injection, barcode scanning, printing, or multiple tabs. Enter 0 to turn off a timer. This applies to idle reload, failed-load retry, dim delay, the page watchdog, and the periodic state publish. Watch, day, and night brightness are 1–100.
 

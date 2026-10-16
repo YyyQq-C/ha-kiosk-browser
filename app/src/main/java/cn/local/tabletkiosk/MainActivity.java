@@ -962,13 +962,11 @@ public final class MainActivity extends ComponentActivity
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    /** 保存语言，刷新通知和 MQTT 名称，然后重建界面。 */
+    /** 只记下语言并刷新已经打开的设置面板，不重建界面、不重载网页、不刷新通知或 MQTT。 */
     @Override
     public void onLanguageChanged(String language) {
         AppLocales.save(this, language);
-        hub.requestReopenSettings();
-        startForegroundService(new Intent(this, KioskService.class).setAction(AppLocales.ACTION_REFRESH));
-        recreate();
+        settings.applyLocale(language);
     }
 
     /** 请求读取 Wi-Fi 名称所需的权限。 */

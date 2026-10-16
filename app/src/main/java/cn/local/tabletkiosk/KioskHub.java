@@ -96,7 +96,7 @@ public final class KioskHub {
         return store;
     }
 
-    /** 切换语言重建界面后，重新打开设置。 */
+    /** 界面重建后重新打开设置。设置里切换语言不会设置这个标记。 */
     public void requestReopenSettings() {
         reopenSettings = true;
     }

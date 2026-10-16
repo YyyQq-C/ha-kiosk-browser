@@ -76,7 +76,7 @@ final class SettingsPanel extends FrameLayout {
 
         boolean wifiGranted();
 
-        /** 切换界面语言并重建界面。 */
+        /** 记下语言。设置面板自行更换文案，不重建 Activity。 */
         void onLanguageChanged(String language);
     }
 
@@ -122,6 +122,11 @@ final class SettingsPanel extends FrameLayout {
     private EditText pinConfirm;
     /** 卡片说明。挂在 Activity 的 Dialog 窗口上，不放进会被圆角裁剪的设置抽屉。 */
     private Dialog helpDialog;
+    /** 设置文案使用的 Context。切换语言时换成对应 Locale，不改 Activity。 */
+    private final Context panelBase;
+    private Context ui;
+    /** 面板当前文案语言。再点同一种语言不重绘。 */
+    private String shownLanguage;
     private boolean open;
     private boolean filling;
     /** 点小时后弹出的选择框。收起面板时关掉，未确认的滚动不写回。 */
@@ -132,6 +137,9 @@ final class SettingsPanel extends FrameLayout {
         super(context);
         this.hub = hub;
         this.host = host;
+        panelBase = context;
+        ui = context;
+        shownLanguage = AppLocales.effective(context);
         density = getResources().getDisplayMetrics().density;
 
         // 半透明遮罩：点击外侧关闭
@@ -231,35 +239,35 @@ final class SettingsPanel extends FrameLayout {
         KioskStatus s = hub.status();
         KioskConfig c = hub.config();
         String battery = s.battery >= 0
-                ? getContext().getString(R.string.battery_value, s.battery, chargeLabel(s.chargeState))
-                : getContext().getString(R.string.unknown);
-        String mqtt = !c.mqttEnabled ? getContext().getString(R.string.mqtt_off)
-                : s.mqttConnected ? getContext().getString(R.string.mqtt_connected)
-                : getContext().getString(R.string.mqtt_disconnected);
+                ? ui.getString(R.string.battery_value, s.battery, chargeLabel(s.chargeState))
+                : ui.getString(R.string.unknown);
+        String mqtt = !c.mqttEnabled ? ui.getString(R.string.mqtt_off)
+                : s.mqttConnected ? ui.getString(R.string.mqtt_connected)
+                : ui.getString(R.string.mqtt_disconnected);
         statusGrid.removeAllViews();
         statRow = null;
         statCount = 0;
-        addStat(getContext().getString(R.string.entity_screen_on), yes(s.screenOn()));
-        addStat(getContext().getString(R.string.entity_presence), yes(s.presence));
-        addStat(getContext().getString(R.string.entity_brightness), s.brightness + "%");
-        addStat(getContext().getString(R.string.entity_battery), battery);
-        addStat(getContext().getString(R.string.section_mqtt), mqtt);
-        addStat(getContext().getString(R.string.entity_lock),
-                s.lockTask ? getContext().getString(R.string.lock_on) : getContext().getString(R.string.lock_off));
-        addStat(getContext().getString(R.string.entity_cpu), percentText(s.cpuPercent));
-        addStat(getContext().getString(R.string.entity_memory), memoryText(s));
-        addStat(getContext().getString(R.string.entity_storage), percentText(s.storagePercent));
-        addStat(getContext().getString(R.string.entity_temperature), temperatureText(s.batteryTempTenths));
-        addStat(getContext().getString(R.string.entity_app_memory), megabyteText(s.appMemoryMb));
+        addStat(ui.getString(R.string.entity_screen_on), yes(s.screenOn()));
+        addStat(ui.getString(R.string.entity_presence), yes(s.presence));
+        addStat(ui.getString(R.string.entity_brightness), s.brightness + "%");
+        addStat(ui.getString(R.string.entity_battery), battery);
+        addStat(ui.getString(R.string.section_mqtt), mqtt);
+        addStat(ui.getString(R.string.entity_lock),
+                s.lockTask ? ui.getString(R.string.lock_on) : ui.getString(R.string.lock_off));
+        addStat(ui.getString(R.string.entity_cpu), percentText(s.cpuPercent));
+        addStat(ui.getString(R.string.entity_memory), memoryText(s));
+        addStat(ui.getString(R.string.entity_storage), percentText(s.storagePercent));
+        addStat(ui.getString(R.string.entity_temperature), temperatureText(s.batteryTempTenths));
+        addStat(ui.getString(R.string.entity_app_memory), megabyteText(s.appMemoryMb));
 
         String ip = NetUtil.localIpv4(getContext());
-        String address = "http://" + (ip.isEmpty() ? getContext().getString(R.string.tablet_ip) : ip) + ":" + c.lanPort;
-        lanHint.setText(getContext().getString(R.string.lan_hint, address));
+        String address = "http://" + (ip.isEmpty() ? ui.getString(R.string.tablet_ip) : ip) + ":" + c.lanPort;
+        lanHint.setText(ui.getString(R.string.lan_hint, address));
 
         String command = "adb shell dpm set-device-owner " + getContext().getPackageName() + "/.KioskAdminReceiver";
         ownerText.setText(s.deviceOwner
-                ? getContext().getString(R.string.owner_active)
-                : getContext().getString(R.string.owner_inactive, command));
+                ? ui.getString(R.string.owner_active)
+                : ui.getString(R.string.owner_inactive, command));
 
         cameraButton.setVisibility(host.cameraGranted() ? GONE : VISIBLE);
         batteryButton.setVisibility(host.batteryExempt() ? GONE : VISIBLE);
@@ -273,7 +281,7 @@ final class SettingsPanel extends FrameLayout {
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = text(context, context.getString(R.string.settings_title), 24, TEXT, true);
         header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        header.addView(languageSwitch(context));
+        header.addView(languageButton(context));
         Button close = button(context, context.getString(R.string.close), this::hide, false);
         header.addView(close);
         form.addView(header);
@@ -568,7 +576,7 @@ final class SettingsPanel extends FrameLayout {
         pinNew.setError(null);
         pinConfirm.setError(null);
         if (!saved.isEmpty() && !current.equals(saved)) {
-            pinCurrent.setError(getContext().getString(R.string.pin_wrong));
+            pinCurrent.setError(ui.getString(R.string.pin_wrong));
             return;
         }
         if (next.isEmpty() && again.isEmpty()) {
@@ -576,11 +584,11 @@ final class SettingsPanel extends FrameLayout {
             return;
         }
         if (!next.equals(again)) {
-            pinConfirm.setError(getContext().getString(R.string.pin_mismatch));
+            pinConfirm.setError(ui.getString(R.string.pin_mismatch));
             return;
         }
         if (!next.matches("\\d{4,8}")) {
-            pinNew.setError(getContext().getString(R.string.error_pin));
+            pinNew.setError(ui.getString(R.string.error_pin));
             return;
         }
         storeSettingsPin(next);
@@ -730,7 +738,7 @@ final class SettingsPanel extends FrameLayout {
         card.setBackground(bg);
         card.addView(text(activity, title, 18, TEXT, true));
         card.addView(scroll, scrollLp);
-        Button close = button(activity, activity.getString(R.string.close), this::dismissHelp, true);
+        Button close = button(activity, ui.getString(R.string.close), this::dismissHelp, true);
         LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         closeLp.topMargin = dp(8);
@@ -881,7 +889,7 @@ final class SettingsPanel extends FrameLayout {
         value.setMinHeight(dp(48));
         value.setGravity(Gravity.CENTER_VERTICAL);
         HourField field = new HourField(value);
-        value.setOnClickListener(v -> openHourDialog(context, label, field));
+        value.setOnClickListener(v -> openHourDialog(label, field));
         column.addView(value, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         hours.put(key, field);
@@ -889,21 +897,27 @@ final class SettingsPanel extends FrameLayout {
     }
 
     /** 弹出 0 到 23 的滚轮。确认后写回并走现有保存；取消、点外侧或返回都不改表单上的小时。 */
-    private void openHourDialog(Context context, String label, HourField field) {
+    private void openHourDialog(String label, HourField field) {
         if (hourDialog != null && hourDialog.isShowing()) hourDialog.dismiss();
-        HourPicker picker = new HourPicker(context);
+        // 对话框必须挂在 Activity 上。按钮文案用设置面板当前语言。
+        Activity activity = findActivity();
+        if (activity == null) {
+            Log.w(KioskApp.LOG, "Hour dialog skipped because the activity is not available");
+            return;
+        }
+        HourPicker picker = new HourPicker(activity);
         picker.setHour(field.getHour());
-        LinearLayout wrap = new LinearLayout(context);
+        LinearLayout wrap = new LinearLayout(activity);
         wrap.setPadding(dp(12), dp(8), dp(12), 0);
         wrap.addView(picker, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(180)));
-        hourDialog = new AlertDialog.Builder(context)
+        hourDialog = new AlertDialog.Builder(activity)
                 .setTitle(label)
                 .setView(wrap)
-                .setPositiveButton(R.string.pin_confirm, (dialog, which) -> {
+                .setPositiveButton(ui.getString(R.string.pin_confirm), (dialog, which) -> {
                     field.setHour(picker.getHour());
                     commit();
                 })
-                .setNegativeButton(R.string.cancel, (dialog, which) -> dialog.cancel())
+                .setNegativeButton(ui.getString(R.string.cancel), (dialog, which) -> dialog.cancel())
                 .create();
         hourDialog.setOnShowListener(dialog -> {
             if (hourDialog.getWindow() != null) {
@@ -1077,22 +1091,91 @@ final class SettingsPanel extends FrameLayout {
         return s;
     }
 
-    /** 标题右侧的中文 / 英文切换。文字固定，当前语言用实心按钮。 */
-    private LinearLayout languageSwitch(Context context) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        String current = AppLocales.effective(context);
-        row.addView(languageChip(context, "中文", AppLocales.ZH, AppLocales.ZH.equals(current)));
-        row.addView(languageChip(context, "EN", AppLocales.EN, AppLocales.EN.equals(current)));
-        return row;
+    /**
+     * 用已保存的语言重建设置文案。面板保持打开。
+     * 语言与当前显示相同时直接返回。
+     */
+    void applyLocale(String language) {
+        if (language == null || language.equals(shownLanguage)) return;
+        int scrollY = scroll.getScrollY();
+        Map<String, String> text = new HashMap<>();
+        Map<String, CharSequence> errors = new HashMap<>();
+        for (Map.Entry<String, EditText> e : fields.entrySet()) {
+            text.put(e.getKey(), e.getValue().getText().toString());
+            CharSequence error = e.getValue().getError();
+            if (error != null) errors.put(e.getKey(), error);
+        }
+        Map<String, Integer> percentValues = new HashMap<>();
+        for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
+            percentValues.put(e.getKey(), e.getValue().bar.getProgress());
+        }
+        Map<String, Integer> hourValues = new HashMap<>();
+        for (Map.Entry<String, HourField> e : hours.entrySet()) {
+            hourValues.put(e.getKey(), e.getValue().getHour());
+        }
+        boolean motion = motionSwitch != null && motionSwitch.isChecked();
+        boolean schedule = scheduleSwitch != null && scheduleSwitch.isChecked();
+        boolean daily = dailySwitch != null && dailySwitch.isChecked();
+        boolean sleep = sleepSwitch != null && sleepSwitch.isChecked();
+        boolean mqtt = mqttSwitch != null && mqttSwitch.isChecked();
+        boolean lan = lanSwitch != null && lanSwitch.isChecked();
+        boolean lock = lockSwitch != null && lockSwitch.isChecked();
+        String pinCurrentDraft = pinCurrent == null ? "" : pinCurrent.getText().toString();
+        String pinNewDraft = pinNew == null ? "" : pinNew.getText().toString();
+        String pinConfirmDraft = pinConfirm == null ? "" : pinConfirm.getText().toString();
+        // 未确认的小时滚轮和旧语言说明关掉，设置抽屉本身不关
+        if (hourDialog != null) hourDialog.dismiss();
+        dismissHelp();
+        InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
+        if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
+
+        shownLanguage = language;
+        ui = AppLocales.forLanguage(panelBase, language);
+        fields.clear();
+        percents.clear();
+        hours.clear();
+        form.removeAllViews();
+        buildForm(ui);
+
+        filling = true;
+        for (Map.Entry<String, String> e : text.entrySet()) {
+            EditText input = fields.get(e.getKey());
+            if (input == null) continue;
+            input.setText(e.getValue());
+            CharSequence error = errors.get(e.getKey());
+            if (error != null) input.setError(error);
+        }
+        for (Map.Entry<String, Integer> e : percentValues.entrySet()) {
+            PercentBar bar = percents.get(e.getKey());
+            if (bar != null) bar.setValue(e.getValue());
+        }
+        for (Map.Entry<String, Integer> e : hourValues.entrySet()) {
+            HourField hour = hours.get(e.getKey());
+            if (hour != null) hour.setHour(e.getValue());
+        }
+        if (motionSwitch != null) motionSwitch.setChecked(motion);
+        if (scheduleSwitch != null) scheduleSwitch.setChecked(schedule);
+        if (dailySwitch != null) dailySwitch.setChecked(daily);
+        if (sleepSwitch != null) sleepSwitch.setChecked(sleep);
+        if (mqttSwitch != null) mqttSwitch.setChecked(mqtt);
+        if (lanSwitch != null) lanSwitch.setChecked(lan);
+        if (lockSwitch != null) lockSwitch.setChecked(lock);
+        if (pinCurrent != null) pinCurrent.setText(pinCurrentDraft);
+        if (pinNew != null) pinNew.setText(pinNewDraft);
+        if (pinConfirm != null) pinConfirm.setText(pinConfirmDraft);
+        if (pinCurrentRow != null) pinCurrentRow.setVisibility(hasSavedPin() ? VISIBLE : GONE);
+        filling = false;
+        refreshStatus();
+        scroll.post(() -> scroll.scrollTo(0, scrollY));
     }
 
-    /** 单个语言按钮；再点当前语言不重建界面。 */
-    private Button languageChip(Context context, String label, String language, boolean selected) {
-        Button chip = button(context, label, () -> {
-            if (!language.equals(AppLocales.saved(context))) host.onLanguageChanged(language);
-        }, selected);
+    /** 标题旁只有一个按钮：文字是当前语言，点一下切到另一种并只重建设置文案。 */
+    private Button languageButton(Context context) {
+        String current = shownLanguage == null ? AppLocales.effective(context) : shownLanguage;
+        Button chip = button(context, AppLocales.buttonLabel(current), () -> {
+            String now = shownLanguage == null ? AppLocales.effective(getContext()) : shownLanguage;
+            host.onLanguageChanged(AppLocales.toggle(now));
+        }, true);
         chip.setTextSize(13);
         chip.setMinHeight(dp(36));
         chip.setMinimumHeight(dp(36));
@@ -1199,7 +1282,7 @@ final class SettingsPanel extends FrameLayout {
 
     /** 把校验代码翻译成当前语言的提示。 */
     private String errorText(String key, String code) {
-        Context context = getContext();
+        Context context = ui;
         if (code.startsWith(ConfigForm.ERR_RANGE_PREFIX)) {
             String[] parts = code.split(":");
             int min = Integer.parseInt(parts[1]);
@@ -1274,29 +1357,29 @@ final class SettingsPanel extends FrameLayout {
 
     /** 布尔值转当前语言。 */
     private String yes(boolean value) {
-        return getContext().getString(value ? R.string.yes : R.string.no);
+        return ui.getString(value ? R.string.yes : R.string.no);
     }
 
     /** 百分比；尚未采样时显示未知。 */
     private String percentText(int value) {
-        return value < 0 ? getContext().getString(R.string.unknown) : value + "%";
+        return value < 0 ? ui.getString(R.string.unknown) : value + "%";
     }
 
     /** 内存占用，能读到总量时附上 MB。 */
     private String memoryText(KioskStatus status) {
-        if (status.memoryPercent < 0) return getContext().getString(R.string.unknown);
+        if (status.memoryPercent < 0) return ui.getString(R.string.unknown);
         if (status.memoryUsedMb < 0 || status.memoryTotalMb < 0) return status.memoryPercent + "%";
         return status.memoryPercent + "%  " + status.memoryUsedMb + "/" + status.memoryTotalMb + " MB";
     }
 
     /** 应用占用 MB。 */
     private String megabyteText(int value) {
-        return value < 0 ? getContext().getString(R.string.unknown) : value + " MB";
+        return value < 0 ? ui.getString(R.string.unknown) : value + " MB";
     }
 
     /** 电池温度，单位是 0.1 摄氏度。 */
     private String temperatureText(int tenths) {
-        if (tenths < -200) return getContext().getString(R.string.unknown);
+        if (tenths < -200) return ui.getString(R.string.unknown);
         return String.format(java.util.Locale.ROOT, "%.1f°C", tenths / 10.0);
     }
 
@@ -1304,13 +1387,13 @@ final class SettingsPanel extends FrameLayout {
     private String chargeLabel(String state) {
         switch (state) {
             case BatteryState.CHARGING:
-                return getContext().getString(R.string.charge_charging);
+                return ui.getString(R.string.charge_charging);
             case BatteryState.DISCHARGING:
-                return getContext().getString(R.string.charge_discharging);
+                return ui.getString(R.string.charge_discharging);
             case BatteryState.NOT_CHARGING:
-                return getContext().getString(R.string.charge_not_charging);
+                return ui.getString(R.string.charge_not_charging);
             case BatteryState.FULL:
-                return getContext().getString(R.string.charge_full);
+                return ui.getString(R.string.charge_full);
             default:
                 return state.toLowerCase(Locale.ROOT);
         }
