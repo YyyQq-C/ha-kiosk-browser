@@ -54,6 +54,12 @@ $env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-21.0.10.7-hotspot'
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
+## 开发与发布
+
+`main` 只保留已经发布的版本。日常开发在 `develop`。发布时把 `develop` 合并到 `main`，打上 `v` 加 `versionName` 的 tag，并在 GitHub Release 附上已签名的 release APK。
+
+本机签名放在 `signing/keystore.properties` 和对应的 keystore 文件中，目录已被忽略，不会提交。没有这份文件时，`assembleRelease` 生成未签名包。已发布的安装包以 GitHub Release 上的 APK 为准。
+
 首次打开会请求摄像头权限，然后提示一次忽略电池优化。未成为设备所有者时，如需开机自动打开界面，请在设置的「系统」分组中点击「允许开机自动打开」，并在系统页面授予「显示在其他应用上层」。
 
 ## 设备所有者
