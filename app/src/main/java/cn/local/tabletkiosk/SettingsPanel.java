@@ -713,6 +713,9 @@ final class SettingsPanel extends FrameLayout {
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        // 内容仍可上下滑动，只是不画出滚动条。
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setHorizontalScrollBarEnabled(false);
         scroll.addView(bodyView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 Math.min(bodyView.getMeasuredHeight(), maxBody));
