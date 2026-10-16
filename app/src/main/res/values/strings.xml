@@ -9,6 +9,9 @@
     <string name="close">关闭</string>
     <string name="section_page">页面</string>
     <string name="home_url">首页网址</string>
+    <string name="setup_hint">第一次使用请先填写 Home Assistant 地址。亮度、声音和连接也可以一起改，确认后点「开始使用」。</string>
+    <string name="setup_url_hint">https://你的地址:8123/</string>
+    <string name="setup_start">开始使用</string>
     <string name="idle_reload">空闲重新加载（小时，0 关闭）</string>
     <string name="retry_seconds">加载失败重试（秒，0 关闭）</string>
     <string name="reload_now">立即刷新</string>

@@ -9,6 +9,9 @@
     <string name="close">Close</string>
     <string name="section_page">Page</string>
     <string name="home_url">Home URL</string>
+    <string name="setup_hint">On first launch, enter the Home Assistant address. Brightness, sound, and connections can be changed here too. Then tap Start.</string>
+    <string name="setup_url_hint">https://your-home:8123/</string>
+    <string name="setup_start">Start</string>
     <string name="idle_reload">Reload after idle (hours, 0 off)</string>
     <string name="retry_seconds">Retry failed loads (seconds, 0 off)</string>
     <string name="reload_now">Reload now</string>

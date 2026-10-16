@@ -168,6 +168,8 @@ public final class MainActivity extends ComponentActivity
     private boolean purgeOnNextFinish;
     private int freshGeneration;
     private String pendingFreshUrl;
+    /** 已经开始加载过首页。首次设置确认后避免再加载一次。 */
+    private boolean homeLoaded;
 
     /** 按已保存的语言创建界面。 */
     @Override
@@ -217,9 +219,20 @@ public final class MainActivity extends ComponentActivity
         idle = new IdleReload(config.idleReloadHours, now);
         camera = new CameraMotion(this, this);
         createWebView();
-        // 安装新版本不会清空上次的网页缓存，启动时丢掉旧前端再加载
-        purgeOnNextFinish = true;
-        loadFresh(config.homeUrl);
+        if (hub.store().needsSetup()) {
+            // 还没有确认过地址，先打开设置，不连接占位首页
+            settings.post(() -> {
+                edge.setEdgeEnabled(false);
+                settings.beginSetup();
+                syncCamera();
+                syncPullRefresh();
+            });
+        } else {
+            // 安装新版本不会清空上次的网页缓存，启动时丢掉旧前端再加载
+            purgeOnNextFinish = true;
+            loadFresh(config.homeUrl);
+            firstRunPrompts();
+        }
 
         hub.setController(this);
         hub.addConfigListener(configListener);
@@ -229,6 +242,7 @@ public final class MainActivity extends ComponentActivity
             @Override
             public void handleOnBackPressed() {
                 if (pinGate != null && pinGate.getVisibility() == View.VISIBLE) hidePinGate();
+                else if (settings.isSetup()) return;
                 else if (settings.isOpen()) settings.hide();
                 else if (web.canGoBack()) web.goBack();
             }
@@ -242,7 +256,6 @@ public final class MainActivity extends ComponentActivity
         refreshOwnerStatus();
         applyBrightness();
         applyVolume();
-        firstRunPrompts();
     }
 
     /** 开始计时并按需打开摄像头。 */
@@ -653,6 +666,7 @@ public final class MainActivity extends ComponentActivity
 
     /** 不经过缓存加载地址；页面还没打开时先正常打开，加载完成后再清一次旧前端。 */
     private void loadFresh(String url) {
+        homeLoaded = true;
         offlineUrl = url;
         web.clearCache(true);
         web.loadUrl(url, noCacheHeaders());
@@ -679,6 +693,7 @@ public final class MainActivity extends ComponentActivity
         String url = pendingFreshUrl;
         pendingFreshUrl = null;
         if (url == null || url.isEmpty()) return;
+        homeLoaded = true;
         Log.i(KioskApp.LOG, "Loading page without cache");
         web.loadUrl(url, noCacheHeaders());
     }
@@ -1144,6 +1159,9 @@ public final class MainActivity extends ComponentActivity
         hub.store().saveHaToken(document.haToken);
         hub.updateConfig(document.config);
         config = hub.config();
+        hub.store().markSetupDone();
+        settings.exitSetup();
+        if (!homeLoaded) loadFresh(config.homeUrl);
         if (!document.language.isEmpty()) AppLocales.save(this, document.language);
         settings.reloadImported(document.language.isEmpty() ? AppLocales.effective(this) : document.language);
         Toast.makeText(this, R.string.settings_imported, Toast.LENGTH_SHORT).show();
@@ -1228,6 +1246,13 @@ public final class MainActivity extends ComponentActivity
         } catch (IllegalStateException e) {
             Log.e(KioskApp.LOG, "Failed to start kiosk service", e);
         }
+    }
+
+    /** 首次设置确认后加载首页，并再提示权限。 */
+    @Override
+    public void onSetupFinished() {
+        if (!homeLoaded) loadFresh(config.homeUrl);
+        firstRunPrompts();
     }
 
     /** 首次运行：未授权时请求摄像头权限，随后提示一次电池优化白名单。 */

@@ -11,6 +11,7 @@ public final class KioskConfigStore {
     private static final String DEVICE_ID = "device_id";
     private static final String BATTERY_PROMPTED = "battery_prompted";
     private static final String HA_TOKEN = "ha_token";
+    private static final String SETUP_DONE = "setup_done";
     private final SharedPreferences prefs;
 
     /** 绑定应用私有配置文件。 */
@@ -124,6 +125,23 @@ public final class KioskConfigStore {
     /** 保存长期访问令牌。空字符串表示清除。 */
     public void saveHaToken(String token) {
         prefs.edit().putString(HA_TOKEN, token == null ? "" : token.trim()).commit();
+    }
+
+    /** 还没有确认过首页时先进入设置。已经改成自己的地址则直接跳过，仍是占位地址则再确认一次。 */
+    public boolean needsSetup() {
+        if (prefs.getBoolean(SETUP_DONE, false)) return false;
+        String saved = prefs.getString(ConfigForm.HOME_URL, "");
+        if (saved != null && !saved.isEmpty() && !KioskConfig.DEFAULT_HOME_URL.equals(saved)) {
+            prefs.edit().putBoolean(SETUP_DONE, true).apply();
+            return false;
+        }
+        return true;
+    }
+
+    /** 用户确认首页后记下，以后启动直接打开该地址。 */
+    public void markSetupDone() {
+        boolean ok = prefs.edit().putBoolean(SETUP_DONE, true).commit();
+        if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist setup completion");
     }
 
     /** 电池优化提示是否已弹出过，只在首次运行主动提示一次。 */

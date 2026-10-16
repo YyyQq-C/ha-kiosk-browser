@@ -84,6 +84,9 @@ final class SettingsPanel extends FrameLayout {
 
         /** 从用户选择的文件读回设置。 */
         void importSettings();
+
+        /** 首次设置已确认，可以加载首页。 */
+        void onSetupFinished();
     }
 
     private static final int TEXT = Color.rgb(22, 40, 44);
@@ -121,6 +124,11 @@ final class SettingsPanel extends FrameLayout {
     private Button batteryButton;
     private Button overlayButton;
     private Button wifiButton;
+    private Button closeButton;
+    private Button startButton;
+    private TextView setupHint;
+    /** 首次打开时必须先确认首页，不能点外侧关掉。 */
+    private boolean setup;
     private LinearLayout currentCard;
     private LinearLayout pinCurrentRow;
     private EditText pinCurrent;
@@ -197,6 +205,63 @@ final class SettingsPanel extends FrameLayout {
         return open;
     }
 
+    /** 首次启动打开设置。首页留空，确认前不能关掉。 */
+    void beginSetup() {
+        setup = true;
+        show();
+        EditText home = fields.get(ConfigForm.HOME_URL);
+        if (home != null) {
+            home.setText("");
+            home.setHint(ui.getString(R.string.setup_url_hint));
+        }
+        applySetupChrome();
+    }
+
+    /** 导入或其他路径已经有首页时，解除首次设置限制。 */
+    void exitSetup() {
+        setup = false;
+        applySetupChrome();
+    }
+
+    /** 是否还停在首次设置。 */
+    boolean isSetup() {
+        return setup;
+    }
+
+    /** 按是否首次设置显示「开始使用」或「关闭」。 */
+    private void applySetupChrome() {
+        if (closeButton != null) closeButton.setVisibility(setup ? GONE : VISIBLE);
+        if (setupHint != null) setupHint.setVisibility(setup ? VISIBLE : GONE);
+        if (startButton != null) startButton.setVisibility(setup ? VISIBLE : GONE);
+        if (setup) {
+            EditText home = fields.get(ConfigForm.HOME_URL);
+            if (home != null && home.getHint() == null) home.setHint(ui.getString(R.string.setup_url_hint));
+        }
+    }
+
+    /** 校验首页并结束首次设置。地址无效时留在设置里。 */
+    private void finishSetup() {
+        commit();
+        EditText home = fields.get(ConfigForm.HOME_URL);
+        if (home != null && home.getError() != null) {
+            home.requestFocus();
+            return;
+        }
+        String url = home == null || home.getText() == null ? "" : home.getText().toString().trim();
+        if (!(url.startsWith("http://") || url.startsWith("https://")) || url.length() < 10 || url.contains(" ")) {
+            if (home != null) {
+                home.setError(ui.getString(R.string.error_url));
+                home.requestFocus();
+            }
+            return;
+        }
+        hub.store().markSetupDone();
+        setup = false;
+        applySetupChrome();
+        host.onSetupFinished();
+        hide();
+    }
+
     /** 填入当前配置并从左侧滑入。 */
     void show() {
         if (open) return;
@@ -214,9 +279,9 @@ final class SettingsPanel extends FrameLayout {
         });
     }
 
-    /** 收起键盘并滑出到左侧。 */
+    /** 收起键盘并滑出到左侧。首次设置未确认时不收起。 */
     void hide() {
-        if (!open) return;
+        if (!open || setup) return;
         dismissHelp();
         // 未点确认的小时选择直接丢掉，随后 commit 仍用表单上的当前小时
         if (hourDialog != null) hourDialog.dismiss();
@@ -288,8 +353,8 @@ final class SettingsPanel extends FrameLayout {
         TextView title = text(context, context.getString(R.string.settings_title), 24, TEXT, true);
         header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         header.addView(languageButton(context));
-        Button close = button(context, context.getString(R.string.close), this::hide, false);
-        header.addView(close);
+        closeButton = button(context, context.getString(R.string.close), this::hide, false);
+        header.addView(closeButton);
         form.addView(header);
 
         statusGrid = new LinearLayout(context);
@@ -299,6 +364,13 @@ final class SettingsPanel extends FrameLayout {
         section(context, context.getString(R.string.section_page), R.string.help_page);
         field(context, ConfigForm.HOME_URL, context.getString(R.string.home_url),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        setupHint = text(context, context.getString(R.string.setup_hint), 14, MUTED, false);
+        setupHint.setLineSpacing(dp(3), 1f);
+        setupHint.setVisibility(GONE);
+        currentCard.addView(setupHint, fullWidth());
+        startButton = button(context, context.getString(R.string.setup_start), this::finishSetup, true);
+        startButton.setVisibility(GONE);
+        currentCard.addView(startButton, fullWidth());
         pair(context,
                 ConfigForm.IDLE_RELOAD_HOURS, context.getString(R.string.idle_reload), InputType.TYPE_CLASS_NUMBER,
                 ConfigForm.RETRY_SECONDS, context.getString(R.string.retry_seconds), InputType.TYPE_CLASS_NUMBER);
@@ -1122,6 +1194,7 @@ final class SettingsPanel extends FrameLayout {
         form.removeAllViews();
         buildForm(ui);
         populate(hub.config());
+        applySetupChrome();
     }
 
     /** 打开仪表盘选择。令牌只保存在本机。 */
@@ -1265,6 +1338,7 @@ final class SettingsPanel extends FrameLayout {
         if (pinCurrentRow != null) pinCurrentRow.setVisibility(hasSavedPin() ? VISIBLE : GONE);
         filling = false;
         refreshStatus();
+        applySetupChrome();
         scroll.post(() -> scroll.scrollTo(0, scrollY));
     }
 
