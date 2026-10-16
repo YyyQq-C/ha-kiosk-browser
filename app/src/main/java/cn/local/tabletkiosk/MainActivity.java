@@ -13,6 +13,10 @@ import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.widget.Toast;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
@@ -48,7 +52,6 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
@@ -75,7 +78,9 @@ public final class MainActivity extends ComponentActivity
             + "if(!s){s=document.createElement('style');s.id='kiosk-lock';"
             + "(document.head||document.documentElement).appendChild(s);}"
             + "s.textContent='*{user-select:none!important;-webkit-user-select:none!important;"
-            + "-webkit-touch-callout:none!important;-webkit-user-drag:none!important}';}catch(e){}";
+            + "-webkit-touch-callout:none!important;-webkit-user-drag:none!important}"
+            + "input,textarea,select,[contenteditable]{user-select:text!important;-webkit-user-select:text!important;"
+            + "-webkit-touch-callout:default!important;-webkit-user-drag:auto!important}';}catch(e){}";
     /** 在页面里注销 Service Worker 并删除 Cache Storage，完成后回调原生。 */
     private static final String PURGE_JS = "(function(){var done=false;function finish(){if(done)return;done=true;"
             + "try{KioskCache.onCleared();}catch(e){}}"
@@ -98,6 +103,7 @@ public final class MainActivity extends ComponentActivity
         }
     };
     private final Runnable retry = this::retryLoad;
+    private String offlineUrl;
     private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
         /** 系统亮屏或息屏时更新“亮屏”状态。 */
         @Override
@@ -121,6 +127,10 @@ public final class MainActivity extends ComponentActivity
                 refreshPanel();
                 maybePromptBattery();
             });
+    private final ActivityResultLauncher<String> exportFile =
+            registerForActivityResult(new ActivityResultContracts.CreateDocument("application/json"), this::writeSettingsFile);
+    private final ActivityResultLauncher<String[]> importFile =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), this::readSettingsFile);
     private final ActivityResultLauncher<Intent> systemScreen =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 systemScreenOpen = false;
@@ -135,6 +145,8 @@ public final class MainActivity extends ComponentActivity
     private TopPullRefreshLayout refresh;
     private WebView web;
     private TextView notice;
+    private View offlinePage;
+    private TextView offlineDetail;
     private TextToSpeech tts;
     private MediaPlayer player;
     private FrameLayout pinGate;
@@ -182,6 +194,7 @@ public final class MainActivity extends ComponentActivity
         root.addView(settings, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
         notice = buildNotice(root);
+        buildOffline(root);
         pinGate = buildPinGate(root);
         setContentView(root);
         if (hub.consumeReopenSettings()) {
@@ -338,9 +351,11 @@ public final class MainActivity extends ComponentActivity
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         CookieManager.getInstance().setAcceptCookie(true);
         web.addJavascriptInterface(new CacheBridge(), "KioskCache");
-        web.setLongClickable(false);
+        web.setLongClickable(true);
         web.setHapticFeedbackEnabled(false);
-        web.setOnLongClickListener(v -> true);
+        // 输入框保留系统的文本操作，其余位置仍吃掉长按菜单
+        web.setOnLongClickListener(v -> web.getHitTestResult() == null
+                || web.getHitTestResult().getType() != android.webkit.WebView.HitTestResult.EDIT_TEXT_TYPE);
         web.setWebViewClient(new KioskWebClient());
         web.setWebChromeClient(new WebChromeClient());
         refresh = new TopPullRefreshLayout(this);
@@ -400,6 +415,7 @@ public final class MainActivity extends ComponentActivity
             });
             if (!mainFrameError) {
                 cancelRetry();
+                hideOffline();
                 watchdog.onPageFinished(SystemClock.elapsedRealtime());
             }
             view.evaluateJavascript(LOCK_JS, null);
@@ -414,7 +430,8 @@ public final class MainActivity extends ComponentActivity
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
-                onLoadFailure("Main frame load failed: code=" + error.getErrorCode() + " " + error.getDescription());
+                onLoadFailure("Main frame load failed: code=" + error.getErrorCode() + " " + error.getDescription(),
+                        request.getUrl().toString());
             }
         }
 
@@ -422,7 +439,7 @@ public final class MainActivity extends ComponentActivity
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
             if (request.isForMainFrame() && response.getStatusCode() >= 500) {
-                onLoadFailure("Main frame HTTP error: " + response.getStatusCode());
+                onLoadFailure("Main frame HTTP error: " + response.getStatusCode(), request.getUrl().toString());
             }
         }
 
@@ -431,6 +448,7 @@ public final class MainActivity extends ComponentActivity
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
             Log.e(KioskApp.LOG, "SSL error rejected: primary=" + error.getPrimaryError());
             handler.cancel();
+            onLoadFailure("SSL error rejected: primary=" + error.getPrimaryError(), error.getUrl());
         }
 
         /** 渲染进程崩溃或被回收时重建网页，避免整个应用退出。 */
@@ -446,20 +464,24 @@ public final class MainActivity extends ComponentActivity
         }
     }
 
-    /** 记录失败并在设定秒数后重试；秒数为 0 时不重试。 */
-    private void onLoadFailure(String reason) {
+    /** 主页面失败时盖上本地等待页，并继续重试。设置里的重试秒数为 0 时按 30 秒。 */
+    private void onLoadFailure(String reason, String url) {
         mainFrameError = true;
         stopPullRefresh();
         Log.w(KioskApp.LOG, reason);
-        if (config.retrySeconds <= 0 || retryPending) return;
+        if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) offlineUrl = url;
+        showOffline(offlineUrl == null || offlineUrl.isEmpty() ? config.homeUrl : offlineUrl);
+        if (retryPending) return;
+        int seconds = config.retrySeconds > 0 ? config.retrySeconds : 30;
         retryPending = true;
-        handler.postDelayed(retry, config.retrySeconds * 1000L);
+        handler.postDelayed(retry, seconds * 1000L);
     }
 
     /** 执行一次重试：不走缓存重新打开失败的页面，没有网址时回首页。 */
     private void retryLoad() {
         retryPending = false;
-        String url = web.getUrl();
+        String url = offlineUrl;
+        if (url == null || url.isEmpty()) url = web.getUrl();
         Log.i(KioskApp.LOG, "Retrying page load");
         loadFresh(url == null || url.isEmpty() ? config.homeUrl : url);
     }
@@ -628,6 +650,7 @@ public final class MainActivity extends ComponentActivity
 
     /** 不经过缓存加载地址；页面还没打开时先正常打开，加载完成后再清一次旧前端。 */
     private void loadFresh(String url) {
+        offlineUrl = url;
         web.clearCache(true);
         web.loadUrl(url, noCacheHeaders());
     }
@@ -786,6 +809,52 @@ public final class MainActivity extends ComponentActivity
         lp.rightMargin = pad;
         root.addView(view, lp);
         return view;
+    }
+
+    /** 网页打不开时盖住画面的本地等待页，设置面板仍在它上面。 */
+    private void buildOffline(FrameLayout root) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setBackgroundColor(Color.rgb(12, 28, 36));
+        int pad = Math.round(28 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad, pad, pad);
+        TextView title = new TextView(this);
+        title.setText(R.string.offline_title);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(28);
+        title.setGravity(Gravity.CENTER);
+        box.addView(title);
+        offlineDetail = new TextView(this);
+        offlineDetail.setText(R.string.offline_body);
+        offlineDetail.setTextColor(Color.rgb(186, 214, 214));
+        offlineDetail.setTextSize(16);
+        offlineDetail.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams detailLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        detailLp.topMargin = pad / 2;
+        box.addView(offlineDetail, detailLp);
+        box.setVisibility(View.GONE);
+        root.addView(box, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        offlinePage = box;
+    }
+
+    /** 显示等待页，并写上正在重试的地址。 */
+    private void showOffline(String url) {
+        if (offlinePage == null) return;
+        offlineDetail.setText(getString(R.string.offline_body, url == null ? "" : url));
+        offlinePage.setVisibility(View.VISIBLE);
+        offlinePage.bringToFront();
+        if (settings != null) settings.bringToFront();
+        if (pinGate != null) pinGate.bringToFront();
+        if (notice != null) notice.bringToFront();
+    }
+
+    /** 主页面已经打开时收起等待页。 */
+    private void hideOffline() {
+        offlineUrl = null;
+        if (offlinePage != null) offlinePage.setVisibility(View.GONE);
     }
 
     /** 把截图长边缩到不超过上限。 */
@@ -1004,6 +1073,77 @@ public final class MainActivity extends ComponentActivity
     public void onLanguageChanged(String language) {
         AppLocales.save(this, language);
         settings.applyLocale(language);
+    }
+
+    /** 让用户选一个位置保存设置文件。 */
+    @Override
+    public void exportSettings() {
+        exportFile.launch("ha-kiosk-settings.json");
+    }
+
+    /** 让用户选一份以前导出的设置文件。 */
+    @Override
+    public void importSettings() {
+        importFile.launch(new String[] {"application/json", "text/*", "*/*"});
+    }
+
+    /** 把当前设置写入用户选定的文件。内容含密码，不写日志。 */
+    private void writeSettingsFile(Uri uri) {
+        if (uri == null) return;
+        String json = SettingsFile.toJson(hub.config(), AppLocales.saved(this), hub.store().haToken());
+        new Thread(() -> {
+            boolean ok = false;
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out != null) {
+                    out.write(json.getBytes(StandardCharsets.UTF_8));
+                    ok = true;
+                }
+            } catch (Exception e) {
+                Log.w(KioskApp.LOG, "Settings export failed", e);
+            }
+            boolean saved = ok;
+            handler.post(() -> Toast.makeText(this, saved ? R.string.settings_exported : R.string.settings_import_failed,
+                    Toast.LENGTH_SHORT).show());
+        }, "settings-export").start();
+    }
+
+    /** 读回设置文件并立即生效。设备编号不改。 */
+    private void readSettingsFile(Uri uri) {
+        if (uri == null) return;
+        new Thread(() -> {
+            SettingsFile.Document document = null;
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input != null) document = SettingsFile.fromJson(readUtf8(input));
+            } catch (Exception e) {
+                Log.w(KioskApp.LOG, "Settings import failed", e);
+            }
+            SettingsFile.Document loaded = document;
+            handler.post(() -> applyImportedSettings(loaded));
+        }, "settings-import").start();
+    }
+
+    /** 按 UTF-8 读完输入流。 */
+    private static String readUtf8(InputStream input) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int count;
+        while ((count = input.read(buffer)) >= 0) out.write(buffer, 0, count);
+        return out.toString(StandardCharsets.UTF_8);
+    }
+
+    /** 在主线程应用导入结果，并刷新已经打开的设置。 */
+    private void applyImportedSettings(SettingsFile.Document document) {
+        if (document == null || document.error != null || document.config == null) {
+            Log.w(KioskApp.LOG, "Settings import rejected");
+            Toast.makeText(this, R.string.settings_import_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        hub.store().saveHaToken(document.haToken);
+        hub.updateConfig(document.config);
+        config = hub.config();
+        if (!document.language.isEmpty()) AppLocales.save(this, document.language);
+        settings.reloadImported(document.language.isEmpty() ? AppLocales.effective(this) : document.language);
+        Toast.makeText(this, R.string.settings_imported, Toast.LENGTH_SHORT).show();
     }
 
     /** 请求读取 Wi-Fi 名称所需的权限。 */

@@ -78,6 +78,12 @@ final class SettingsPanel extends FrameLayout {
 
         /** 记下语言。设置面板自行更换文案，不重建 Activity。 */
         void onLanguageChanged(String language);
+
+        /** 把设置写到用户选择的文件。 */
+        void exportSettings();
+
+        /** 从用户选择的文件读回设置。 */
+        void importSettings();
     }
 
     private static final int TEXT = Color.rgb(22, 40, 44);
@@ -307,6 +313,8 @@ final class SettingsPanel extends FrameLayout {
         pageActions.addView(button(context, context.getString(R.string.reload_now), host::reloadNow, true), weighted());
         pageActions.addView(button(context, context.getString(R.string.go_home), host::goHome, false), weighted());
         currentCard.addView(pageActions);
+        currentCard.addView(button(context, context.getString(R.string.pick_dashboard), this::chooseDashboard, false),
+                fullWidth());
 
         section(context, context.getString(R.string.section_brightness), R.string.help_brightness);
         // 观看 1–100、待机 0–100，与 ConfigForm 校验一致
@@ -394,6 +402,13 @@ final class SettingsPanel extends FrameLayout {
         currentCard.addView(overlayButton, fullWidth());
         wifiButton = button(context, context.getString(R.string.grant_wifi), host::requestWifiPermission, false);
         currentCard.addView(wifiButton, fullWidth());
+        TextView fileHelp = text(context, context.getString(R.string.settings_file_hint), 13, MUTED, false);
+        fileHelp.setLineSpacing(dp(3), 1f);
+        currentCard.addView(fileHelp, fullWidth());
+        LinearLayout fileActions = row(context);
+        fileActions.addView(button(context, context.getString(R.string.export_settings), host::exportSettings, false), weighted());
+        fileActions.addView(button(context, context.getString(R.string.import_settings), host::importSettings, false), weighted());
+        currentCard.addView(fileActions);
         currentCard.addView(button(context, context.getString(R.string.open_system_settings), host::openSystemSettings, false),
                 fullWidth());
         addFooter(context);
@@ -1095,6 +1110,90 @@ final class SettingsPanel extends FrameLayout {
      * 用已保存的语言重建设置文案。面板保持打开。
      * 语言与当前显示相同时直接返回。
      */
+    /** 导入完成后按新配置和新语言重建设置，不保留导入前未保存的草稿。 */
+    void reloadImported(String language) {
+        if (hourDialog != null) hourDialog.dismiss();
+        dismissHelp();
+        shownLanguage = language == null || language.isEmpty() ? AppLocales.effective(panelBase) : language;
+        ui = AppLocales.forLanguage(panelBase, shownLanguage);
+        fields.clear();
+        percents.clear();
+        hours.clear();
+        form.removeAllViews();
+        buildForm(ui);
+        populate(hub.config());
+    }
+
+    /** 打开仪表盘选择。令牌只保存在本机。 */
+    private void chooseDashboard() {
+        Context context = ui == null ? getContext() : ui;
+        Dialog dialog = new Dialog(getContext());
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, pad, pad, pad);
+        TextView hint = text(context, context.getString(R.string.ha_token_hint), 14, MUTED, false);
+        hint.setLineSpacing(dp(3), 1f);
+        box.addView(hint, fullWidth());
+        EditText token = new EditText(context);
+        token.setText(hub.store().haToken());
+        token.setHint(context.getString(R.string.ha_token));
+        token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        token.setSingleLine(true);
+        box.addView(token, fullWidth());
+        LinearLayout list = new LinearLayout(context);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView choices = new ScrollView(context);
+        choices.addView(list);
+        LinearLayout.LayoutParams choicesLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(320));
+        choicesLp.topMargin = dp(12);
+        box.addView(choices, choicesLp);
+        box.addView(button(context, context.getString(R.string.dashboard_load), () -> loadDashboards(token, list, dialog), true),
+                fullWidth());
+        box.addView(button(context, context.getString(R.string.close), dialog::dismiss, false), fullWidth());
+        dialog.setContentView(box);
+        dialog.show();
+    }
+
+    /** 在后台读取仪表盘，结果回到主线程。 */
+    private void loadDashboards(EditText tokenInput, LinearLayout list, Dialog dialog) {
+        String token = tokenInput.getText() == null ? "" : tokenInput.getText().toString().trim();
+        hub.store().saveHaToken(token);
+        EditText home = fields.get(ConfigForm.HOME_URL);
+        String homeUrl = home == null || home.getText() == null ? hub.config().homeUrl : home.getText().toString();
+        Context context = ui == null ? getContext() : ui;
+        list.removeAllViews();
+        list.addView(text(context, context.getString(R.string.dashboard_loading), 14, MUTED, false));
+        new Thread(() -> {
+            HaDashboards.Outcome outcome = HaDashboards.load(homeUrl, token);
+            post(() -> showDashboards(outcome, list, dialog));
+        }, "ha-dashboards").start();
+    }
+
+    /** 把仪表盘列成按钮。点一项就写入首页并保存。 */
+    private void showDashboards(HaDashboards.Outcome outcome, LinearLayout list, Dialog dialog) {
+        Context context = ui == null ? getContext() : ui;
+        list.removeAllViews();
+        if (outcome.error != null) {
+            int message = "unauthorized".equals(outcome.error) ? R.string.dashboard_unauthorized : R.string.dashboard_unreachable;
+            list.addView(text(context, context.getString(message), 14, TEXT, false));
+            return;
+        }
+        if (outcome.items.isEmpty()) {
+            list.addView(text(context, context.getString(R.string.dashboard_empty), 14, TEXT, false));
+            return;
+        }
+        for (HaDashboards.Item item : outcome.items) {
+            list.addView(button(context, item.title, () -> {
+                EditText home = fields.get(ConfigForm.HOME_URL);
+                if (home != null) home.setText(item.url);
+                commit();
+                dialog.dismiss();
+            }, false), fullWidth());
+        }
+    }
+
     void applyLocale(String language) {
         if (language == null || language.equals(shownLanguage)) return;
         int scrollY = scroll.getScrollY();

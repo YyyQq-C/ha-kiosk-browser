@@ -10,6 +10,7 @@ public final class KioskConfigStore {
     private static final String PREFS = "kiosk_config";
     private static final String DEVICE_ID = "device_id";
     private static final String BATTERY_PROMPTED = "battery_prompted";
+    private static final String HA_TOKEN = "ha_token";
     private final SharedPreferences prefs;
 
     /** 绑定应用私有配置文件。 */
@@ -112,6 +113,17 @@ public final class KioskConfigStore {
         id = sb.toString();
         prefs.edit().putString(DEVICE_ID, id).apply();
         return id;
+    }
+
+    /** 读取用于列出仪表盘的长期访问令牌。 */
+    public String haToken() {
+        String token = prefs.getString(HA_TOKEN, "");
+        return token == null ? "" : token;
+    }
+
+    /** 保存长期访问令牌。空字符串表示清除。 */
+    public void saveHaToken(String token) {
+        prefs.edit().putString(HA_TOKEN, token == null ? "" : token.trim()).commit();
     }
 
     /** 电池优化提示是否已弹出过，只在首次运行主动提示一次。 */
