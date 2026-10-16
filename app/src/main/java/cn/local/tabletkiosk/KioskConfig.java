@@ -28,6 +28,20 @@ public final class KioskConfig {
     public final int lanPort;
     public final String lanPassword;
     public final boolean lockTaskEnabled;
+    public final boolean scheduleEnabled;
+    public final int dayStartHour;
+    public final int nightStartHour;
+    public final int dayBrightness;
+    public final int nightBrightness;
+    public final boolean dailyReloadEnabled;
+    public final int dailyReloadHour;
+    public final int dailyReloadMinute;
+    public final boolean sleepEnabled;
+    public final int sleepStartHour;
+    public final int sleepEndHour;
+    public final int volume;
+    public final String settingsPin;
+    public final int watchdogSeconds;
 
     /** 由构建器生成配置，空字符串统一转为非 null。 */
     private KioskConfig(Builder b) {
@@ -52,6 +66,20 @@ public final class KioskConfig {
         lanPort = b.lanPort;
         lanPassword = nonNull(b.lanPassword);
         lockTaskEnabled = b.lockTaskEnabled;
+        scheduleEnabled = b.scheduleEnabled;
+        dayStartHour = b.dayStartHour;
+        nightStartHour = b.nightStartHour;
+        dayBrightness = b.dayBrightness;
+        nightBrightness = b.nightBrightness;
+        dailyReloadEnabled = b.dailyReloadEnabled;
+        dailyReloadHour = b.dailyReloadHour;
+        dailyReloadMinute = b.dailyReloadMinute;
+        sleepEnabled = b.sleepEnabled;
+        sleepStartHour = b.sleepStartHour;
+        sleepEndHour = b.sleepEndHour;
+        volume = b.volume;
+        settingsPin = nonNull(b.settingsPin);
+        watchdogSeconds = b.watchdogSeconds;
     }
 
     /** 返回首次启动使用的默认配置。 */
@@ -83,6 +111,20 @@ public final class KioskConfig {
         b.lanPort = lanPort;
         b.lanPassword = lanPassword;
         b.lockTaskEnabled = lockTaskEnabled;
+        b.scheduleEnabled = scheduleEnabled;
+        b.dayStartHour = dayStartHour;
+        b.nightStartHour = nightStartHour;
+        b.dayBrightness = dayBrightness;
+        b.nightBrightness = nightBrightness;
+        b.dailyReloadEnabled = dailyReloadEnabled;
+        b.dailyReloadHour = dailyReloadHour;
+        b.dailyReloadMinute = dailyReloadMinute;
+        b.sleepEnabled = sleepEnabled;
+        b.sleepStartHour = sleepStartHour;
+        b.sleepEndHour = sleepEndHour;
+        b.volume = volume;
+        b.settingsPin = settingsPin;
+        b.watchdogSeconds = watchdogSeconds;
         return b;
     }
 
@@ -115,6 +157,13 @@ public final class KioskConfig {
                 && dimDelaySeconds == c.dimDelaySeconds && motionEnabled == c.motionEnabled
                 && motionSensitivity == c.motionSensitivity && presenceHoldSeconds == c.presenceHoldSeconds
                 && mqttStateIntervalSeconds == c.mqttStateIntervalSeconds && lockTaskEnabled == c.lockTaskEnabled
+                && scheduleEnabled == c.scheduleEnabled && dayStartHour == c.dayStartHour
+                && nightStartHour == c.nightStartHour && dayBrightness == c.dayBrightness
+                && nightBrightness == c.nightBrightness && dailyReloadEnabled == c.dailyReloadEnabled
+                && dailyReloadHour == c.dailyReloadHour && dailyReloadMinute == c.dailyReloadMinute
+                && sleepEnabled == c.sleepEnabled && sleepStartHour == c.sleepStartHour
+                && sleepEndHour == c.sleepEndHour && volume == c.volume && watchdogSeconds == c.watchdogSeconds
+                && settingsPin.equals(c.settingsPin)
                 && homeUrl.equals(c.homeUrl) && sameMqttConnection(c) && sameLanServer(c);
     }
 
@@ -123,7 +172,9 @@ public final class KioskConfig {
         return Objects.hash(homeUrl, idleReloadHours, retrySeconds, watchBrightness, standbyBrightness,
                 dimDelaySeconds, motionEnabled, motionSensitivity, presenceHoldSeconds, mqttEnabled, mqttHost,
                 mqttPort, mqttUsername, mqttBaseTopic, mqttDiscoveryPrefix, mqttStateIntervalSeconds, lanEnabled,
-                lanPort, lockTaskEnabled);
+                lanPort, lockTaskEnabled, scheduleEnabled, dayStartHour, nightStartHour, dayBrightness,
+                nightBrightness, dailyReloadEnabled, dailyReloadHour, dailyReloadMinute, sleepEnabled,
+                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds);
     }
 
     /** 可变构建器，字段初值即首次启动的默认值。 */
@@ -149,6 +200,20 @@ public final class KioskConfig {
         public int lanPort = 2323;
         public String lanPassword = "";
         public boolean lockTaskEnabled = true;
+        public boolean scheduleEnabled = false;
+        public int dayStartHour = 7;
+        public int nightStartHour = 22;
+        public int dayBrightness = 70;
+        public int nightBrightness = 30;
+        public boolean dailyReloadEnabled = false;
+        public int dailyReloadHour = 3;
+        public int dailyReloadMinute = 0;
+        public boolean sleepEnabled = false;
+        public int sleepStartHour = 23;
+        public int sleepEndHour = 7;
+        public int volume = 70;
+        public String settingsPin = "";
+        public int watchdogSeconds = 0;
 
         /** 生成不可变配置。 */
         public KioskConfig build() {

@@ -42,6 +42,20 @@ public final class KioskConfigStore {
         b.lanPort = prefs.getInt(ConfigForm.LAN_PORT, d.lanPort);
         b.lanPassword = prefs.getString(ConfigForm.LAN_PASSWORD, d.lanPassword);
         b.lockTaskEnabled = prefs.getBoolean("lock_task_enabled", d.lockTaskEnabled);
+        b.scheduleEnabled = prefs.getBoolean("schedule_enabled", d.scheduleEnabled);
+        b.dayStartHour = prefs.getInt(ConfigForm.DAY_START_HOUR, d.dayStartHour);
+        b.nightStartHour = prefs.getInt(ConfigForm.NIGHT_START_HOUR, d.nightStartHour);
+        b.dayBrightness = prefs.getInt(ConfigForm.DAY_BRIGHTNESS, d.dayBrightness);
+        b.nightBrightness = prefs.getInt(ConfigForm.NIGHT_BRIGHTNESS, d.nightBrightness);
+        b.dailyReloadEnabled = prefs.getBoolean("daily_reload_enabled", d.dailyReloadEnabled);
+        b.dailyReloadHour = prefs.getInt(ConfigForm.DAILY_RELOAD_HOUR, d.dailyReloadHour);
+        b.dailyReloadMinute = prefs.getInt(ConfigForm.DAILY_RELOAD_MINUTE, d.dailyReloadMinute);
+        b.sleepEnabled = prefs.getBoolean("sleep_enabled", d.sleepEnabled);
+        b.sleepStartHour = prefs.getInt(ConfigForm.SLEEP_START_HOUR, d.sleepStartHour);
+        b.sleepEndHour = prefs.getInt(ConfigForm.SLEEP_END_HOUR, d.sleepEndHour);
+        b.volume = prefs.getInt(ConfigForm.VOLUME, d.volume);
+        b.settingsPin = prefs.getString(ConfigForm.SETTINGS_PIN, d.settingsPin);
+        b.watchdogSeconds = prefs.getInt(ConfigForm.WATCHDOG_SECONDS, d.watchdogSeconds);
         return b.build();
     }
 
@@ -69,6 +83,20 @@ public final class KioskConfigStore {
                 .putInt(ConfigForm.LAN_PORT, c.lanPort)
                 .putString(ConfigForm.LAN_PASSWORD, c.lanPassword)
                 .putBoolean("lock_task_enabled", c.lockTaskEnabled)
+                .putBoolean("schedule_enabled", c.scheduleEnabled)
+                .putInt(ConfigForm.DAY_START_HOUR, c.dayStartHour)
+                .putInt(ConfigForm.NIGHT_START_HOUR, c.nightStartHour)
+                .putInt(ConfigForm.DAY_BRIGHTNESS, c.dayBrightness)
+                .putInt(ConfigForm.NIGHT_BRIGHTNESS, c.nightBrightness)
+                .putBoolean("daily_reload_enabled", c.dailyReloadEnabled)
+                .putInt(ConfigForm.DAILY_RELOAD_HOUR, c.dailyReloadHour)
+                .putInt(ConfigForm.DAILY_RELOAD_MINUTE, c.dailyReloadMinute)
+                .putBoolean("sleep_enabled", c.sleepEnabled)
+                .putInt(ConfigForm.SLEEP_START_HOUR, c.sleepStartHour)
+                .putInt(ConfigForm.SLEEP_END_HOUR, c.sleepEndHour)
+                .putInt(ConfigForm.VOLUME, c.volume)
+                .putString(ConfigForm.SETTINGS_PIN, c.settingsPin)
+                .putInt(ConfigForm.WATCHDOG_SECONDS, c.watchdogSeconds)
                 .commit();
         if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist kiosk config");
     }

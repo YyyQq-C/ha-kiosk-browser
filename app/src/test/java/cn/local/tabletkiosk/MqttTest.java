@@ -15,6 +15,13 @@ public class MqttTest {
     private final MqttTopics topics = new MqttTopics("home_kiosk", "homeassistant", "kiosk_ab12cd34");
     private final MqttDiscovery.Device device =
             new MqttDiscovery.Device("kiosk_ab12cd34", "居家屏幕", "LENOVO", "TB128FU", "1.0.0");
+    private final MqttDiscovery.Labels labels = new MqttDiscovery.Labels(
+            "亮屏", "有人靠近", "电量", "充电中", "充电状态", "当前亮度", "设置亮度", "当前网址", "立即刷新", "唤醒屏幕", "重启平板",
+            "当前待机", "人体检测", "待机亮度", "无人后降亮度", "锁定模式", "熄屏", "回到首页", "打开页面", "屏幕截图", "画面通知", "语音播报",
+            "按时间切换亮度", "白天亮度", "夜间亮度", "本机地址", "应用版本", "设备型号", "系统版本",
+            "媒体音量", "播放音频", "每天刷新", "每天刷新的小时", "每天刷新的分钟", "夜间熄屏", "熄屏开始", "熄屏结束",
+            "页面看门狗", "Wi-Fi 名称", "Wi-Fi 信号",
+            "CPU", "内存", "内存不足", "存储", "应用内存", "电池温度");
 
     /** 主题格式。 */
     @Test
@@ -96,7 +103,7 @@ public class MqttTest {
     /** 自动发现包含全部实体，且挂在同一设备下。 */
     @Test
     public void discoveryEntities() {
-        List<MqttDiscovery.Message> messages = MqttDiscovery.build(topics, device, false);
+        List<MqttDiscovery.Message> messages = MqttDiscovery.build(topics, device, labels, false);
         Set<String> seen = new HashSet<>();
         for (MqttDiscovery.Message m : messages) seen.add(m.topic);
         String[] expected = {
@@ -113,14 +120,16 @@ public class MqttTest {
             assertTrue(m.payload.contains("\"name\":\"居家屏幕\""));
             assertTrue(m.payload.contains("\"availability_topic\":\"home_kiosk/kiosk_ab12cd34/availability\""));
         }
+        assertTrue(payloadOf(messages, "homeassistant/binary_sensor/kiosk_ab12cd34/screen_on/config")
+                .contains("\"name\":\"亮屏\""));
     }
 
     /** 不是设备所有者时用空保留消息删除重启按钮；是时发布。 */
     @Test
     public void rebootButtonOnlyForDeviceOwner() {
         String topic = "homeassistant/button/kiosk_ab12cd34/reboot/config";
-        assertEquals("", payloadOf(MqttDiscovery.build(topics, device, false), topic));
-        String owner = payloadOf(MqttDiscovery.build(topics, device, true), topic);
+        assertEquals("", payloadOf(MqttDiscovery.build(topics, device, labels, false), topic));
+        String owner = payloadOf(MqttDiscovery.build(topics, device, labels, true), topic);
         assertTrue(owner.contains("\"device_class\":\"restart\""));
         assertTrue(owner.contains("\"command_topic\":\"home_kiosk/kiosk_ab12cd34/cmd/reboot\""));
     }

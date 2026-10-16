@@ -6,6 +6,28 @@ final class MqttTopics {
     static final String CMD_WAKE = "wake";
     static final String CMD_REBOOT = "reboot";
     static final String CMD_BRIGHTNESS = "brightness";
+    static final String CMD_URL = "url";
+    static final String CMD_HOME = "home";
+    static final String CMD_MOTION = "motion";
+    static final String CMD_STANDBY = "standby_brightness";
+    static final String CMD_DIM_DELAY = "dim_delay";
+    static final String CMD_LOCK = "lock_task";
+    static final String CMD_SCREEN_OFF = "screen_off";
+    static final String CMD_SCREENSHOT = "screenshot";
+    static final String CMD_NOTIFY = "notify";
+    static final String CMD_TTS = "tts";
+    static final String CMD_SCHEDULE = "schedule";
+    static final String CMD_DAY = "day_brightness";
+    static final String CMD_NIGHT = "night_brightness";
+    static final String CMD_VOLUME = "volume";
+    static final String CMD_PLAY = "play";
+    static final String CMD_DAILY = "daily_reload";
+    static final String CMD_DAILY_HOUR = "daily_hour";
+    static final String CMD_DAILY_MINUTE = "daily_minute";
+    static final String CMD_SLEEP = "sleep";
+    static final String CMD_SLEEP_START = "sleep_start";
+    static final String CMD_SLEEP_END = "sleep_end";
+    static final String CMD_WATCHDOG = "watchdog";
 
     final String deviceId;
     private final String base;
@@ -30,6 +52,11 @@ final class MqttTopics {
     /** 状态 JSON 主题。 */
     String state() {
         return base + "/state";
+    }
+
+    /** 截屏图片主题，内容是 JPEG 字节。 */
+    String camera() {
+        return base + "/camera/image";
     }
 
     /** 某个命令的主题。 */

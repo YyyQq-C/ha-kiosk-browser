@@ -5,6 +5,10 @@ import android.net.ConnectivityManager;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.TransportInfo;
+import android.net.wifi.WifiInfo;
+import android.util.Log;
 import java.net.Inet4Address;
 
 /** 网络辅助方法。 */
@@ -24,5 +28,42 @@ final class NetUtil {
             if (address.getAddress() instanceof Inet4Address) return address.getAddress().getHostAddress();
         }
         return "";
+    }
+
+    /** 当前 Wi-Fi 名称和信号。没有权限或不是 Wi-Fi 时名称为空，信号为 -127。 */
+    static WifiSnapshot wifi(Context context) {
+        WifiSnapshot unknown = new WifiSnapshot("", -127);
+        try {
+            ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+            if (cm == null) return unknown;
+            Network network = cm.getActiveNetwork();
+            if (network == null) return unknown;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            if (caps == null) return unknown;
+            TransportInfo info = caps.getTransportInfo();
+            if (!(info instanceof WifiInfo)) return unknown;
+            WifiInfo wifi = (WifiInfo) info;
+            String ssid = wifi.getSSID();
+            if (ssid == null || "<unknown ssid>".equals(ssid)) ssid = "";
+            else if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                ssid = ssid.substring(1, ssid.length() - 1);
+            }
+            return new WifiSnapshot(ssid, wifi.getRssi());
+        } catch (RuntimeException e) {
+            Log.w(KioskApp.LOG, "Wi-Fi status unavailable", e);
+            return unknown;
+        }
+    }
+
+    /** 一次 Wi-Fi 读取结果。 */
+    static final class WifiSnapshot {
+        final String ssid;
+        final int rssi;
+
+        /** 保存名称和信号强度。 */
+        WifiSnapshot(String ssid, int rssi) {
+            this.ssid = ssid == null ? "" : ssid;
+            this.rssi = rssi;
+        }
     }
 }

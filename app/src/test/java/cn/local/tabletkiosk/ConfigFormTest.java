@@ -69,6 +69,9 @@ public class ConfigFormTest {
                 ConfigForm.MQTT_BASE_TOPIC, ConfigForm.MQTT_DISCOVERY_PREFIX}) {
             assertTrue(key, r.errors.containsKey(key));
         }
+        assertEquals(ConfigForm.ERR_URL, r.errors.get(ConfigForm.HOME_URL));
+        assertEquals("range:0:720", r.errors.get(ConfigForm.IDLE_RELOAD_HOURS));
+        assertEquals(ConfigForm.ERR_TOPIC, r.errors.get(ConfigForm.MQTT_BASE_TOPIC));
     }
 
     /** 开启 MQTT 需要主机；开启局域网需要至少 8 位密码。 */
@@ -86,6 +89,35 @@ public class ConfigFormTest {
         r = ConfigForm.parse(t, true, true, true, true);
         assertTrue(r.errors.toString(), r.ok());
         assertEquals("192.168.1.16", r.config.mqttHost);
+    }
+
+    /** 普通保存不带设置密码时，不能把已保存的密码写成空。 */
+    @Test
+    public void omittedSettingsPinDoesNotClearSavedPin() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.settingsPin = "1234";
+        builder.volume = 70;
+        KioskConfig saved = builder.build();
+        Map<String, String> text = ConfigForm.toText(saved);
+        text.remove(ConfigForm.SETTINGS_PIN);
+        text.put(ConfigForm.VOLUME, "40");
+        ConfigForm.Result result = ConfigForm.parse(text, saved.motionEnabled, saved.mqttEnabled, saved.lanEnabled,
+                saved.lockTaskEnabled, saved.scheduleEnabled, saved.dailyReloadEnabled, saved.sleepEnabled);
+        assertTrue(result.errors.toString(), result.ok());
+        assertEquals("", result.config.settingsPin);
+        KioskConfig kept = ConfigForm.preserveSettingsPin(result.config, saved.settingsPin);
+        assertEquals("1234", kept.settingsPin);
+        assertEquals(40, kept.volume);
+    }
+
+    /** 显式提交的设置密码仍按 4 到 8 位数字校验。 */
+    @Test
+    public void explicitSettingsPinStillValidated() {
+        Map<String, String> text = ConfigForm.toText(KioskConfig.defaults());
+        text.put(ConfigForm.SETTINGS_PIN, "12");
+        ConfigForm.Result result = ConfigForm.parse(text, true, false, false, true);
+        assertFalse(result.ok());
+        assertEquals(ConfigForm.ERR_PIN, result.errors.get(ConfigForm.SETTINGS_PIN));
     }
 
     /** 电池广播换算。 */

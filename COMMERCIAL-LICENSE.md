@@ -1,5 +1,7 @@
 # 商业授权
 
+[English](COMMERCIAL-LICENSE.en.md)
+
 版权所有 (C) 2026 YyyQq-C。
 
 居家屏幕（ha-kiosk-browser）可以按仓库中的 GNU Affero General Public License v3.0 使用。按该许可证使用时，不需要另外付费，也不需要这份商业授权。

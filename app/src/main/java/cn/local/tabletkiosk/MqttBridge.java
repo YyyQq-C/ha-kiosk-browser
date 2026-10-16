@@ -1,5 +1,7 @@
 package cn.local.tabletkiosk;
 
+import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
@@ -24,7 +26,7 @@ final class MqttBridge {
     private static final String OFFLINE = "offline";
 
     private final KioskHub hub;
-    private final MqttDiscovery.Device device;
+    private final Context context;
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private KioskConfig config;
     private MqttClient client;
@@ -34,10 +36,10 @@ final class MqttBridge {
     private ScheduledFuture<?> retry;
     private Boolean publishedOwner;
 
-    /** 绑定状态中心和设备信息。 */
-    MqttBridge(KioskHub hub, MqttDiscovery.Device device) {
+    /** 绑定状态中心；设备名称在发布时按当前语言读取。 */
+    MqttBridge(KioskHub hub, Context context) {
         this.hub = hub;
-        this.device = device;
+        this.context = context.getApplicationContext();
     }
 
     /** 应用新配置；连接参数变化时重连，否则只调整上报间隔。 */
@@ -68,12 +70,12 @@ final class MqttBridge {
     private void connect() {
         generation++;
         int gen = generation;
-        MqttTopics t = new MqttTopics(config.mqttBaseTopic, config.mqttDiscoveryPrefix, device.id);
+        MqttTopics t = new MqttTopics(config.mqttBaseTopic, config.mqttDiscoveryPrefix, hub.deviceId());
         topics = t;
         String host = config.mqttHost.contains(":") ? "[" + config.mqttHost + "]" : config.mqttHost;
         String uri = "tcp://" + host + ":" + config.mqttPort;
         try {
-            client = new MqttClient(uri, device.id, new MemoryPersistence());
+            client = new MqttClient(uri, hub.deviceId(), new MemoryPersistence());
             client.setCallback(new Callback(gen));
             client.connect(options(t));
             Log.i(KioskApp.LOG, "MQTT connected to " + uri);
@@ -151,7 +153,9 @@ final class MqttBridge {
     private void publishDiscovery() {
         if (client == null || !client.isConnected()) return;
         boolean owner = hub.status().deviceOwner;
-        for (MqttDiscovery.Message m : MqttDiscovery.build(topics, device, owner)) publish(m.topic, m.payload, true);
+        for (MqttDiscovery.Message m : MqttDiscovery.build(topics, device(), labels(), owner)) {
+            publish(m.topic, m.payload, true);
+        }
         publishedOwner = owner;
         Log.i(KioskApp.LOG, "MQTT discovery published, deviceOwner=" + owner);
     }
@@ -172,6 +176,91 @@ final class MqttBridge {
         if (config.mqttEnabled && seconds > 0) {
             periodic = worker.scheduleWithFixedDelay(this::publishStateNow, seconds, seconds, TimeUnit.SECONDS);
         }
+    }
+
+    /** 用当前语言重新发布发现信息。 */
+    void republishDiscovery() {
+        worker.execute(this::publishDiscovery);
+    }
+
+    /** 按已保存的界面语言取文案。 */
+    private Context localized() {
+        return AppLocales.wrap(context);
+    }
+
+    /** 按当前界面语言生成设备信息。 */
+    private MqttDiscovery.Device device() {
+        return new MqttDiscovery.Device(hub.deviceId(), localized().getString(R.string.app_name),
+                Build.MANUFACTURER, Build.MODEL, BuildConfig.VERSION_NAME);
+    }
+
+    /** 按当前界面语言生成实体名称。 */
+    private MqttDiscovery.Labels labels() {
+        Context text = localized();
+        return new MqttDiscovery.Labels(
+                text.getString(R.string.entity_screen_on),
+                text.getString(R.string.entity_presence),
+                text.getString(R.string.entity_battery),
+                text.getString(R.string.entity_charging),
+                text.getString(R.string.entity_charge_state),
+                text.getString(R.string.entity_brightness),
+                text.getString(R.string.entity_watch_brightness),
+                text.getString(R.string.entity_url),
+                text.getString(R.string.entity_reload),
+                text.getString(R.string.entity_wake),
+                text.getString(R.string.entity_reboot),
+                text.getString(R.string.entity_standby),
+                text.getString(R.string.entity_motion),
+                text.getString(R.string.entity_standby_brightness),
+                text.getString(R.string.entity_dim_delay),
+                text.getString(R.string.entity_lock),
+                text.getString(R.string.entity_screen_off),
+                text.getString(R.string.entity_home),
+                text.getString(R.string.entity_open_url),
+                text.getString(R.string.entity_screenshot),
+                text.getString(R.string.entity_notify),
+                text.getString(R.string.entity_speak),
+                text.getString(R.string.entity_schedule),
+                text.getString(R.string.entity_day_brightness),
+                text.getString(R.string.entity_night_brightness),
+                text.getString(R.string.entity_ip),
+                text.getString(R.string.entity_app_version),
+                text.getString(R.string.entity_model),
+                text.getString(R.string.entity_android),
+                text.getString(R.string.entity_volume),
+                text.getString(R.string.entity_play),
+                text.getString(R.string.entity_daily),
+                text.getString(R.string.entity_daily_hour),
+                text.getString(R.string.entity_daily_minute),
+                text.getString(R.string.entity_sleep),
+                text.getString(R.string.entity_sleep_start),
+                text.getString(R.string.entity_sleep_end),
+                text.getString(R.string.entity_watchdog),
+                text.getString(R.string.entity_wifi_ssid),
+                text.getString(R.string.entity_wifi_signal),
+                text.getString(R.string.entity_cpu),
+                text.getString(R.string.entity_memory),
+                text.getString(R.string.entity_memory_low),
+                text.getString(R.string.entity_storage),
+                text.getString(R.string.entity_app_memory),
+                text.getString(R.string.entity_temperature));
+    }
+
+    /** 发布截屏 JPEG，保留最后一张给 Home Assistant 摄像头实体。 */
+    void publishScreenshot(byte[] jpeg) {
+        if (jpeg == null || jpeg.length == 0) return;
+        worker.execute(() -> {
+            if (client == null || !client.isConnected() || topics == null) return;
+            try {
+                MqttMessage message = new MqttMessage(jpeg);
+                message.setQos(0);
+                message.setRetained(true);
+                client.publish(topics.camera(), message);
+                Log.i(KioskApp.LOG, "MQTT screenshot published, bytes=" + jpeg.length);
+            } catch (MqttException e) {
+                Log.w(KioskApp.LOG, "MQTT screenshot failed: reason=" + e.getReasonCode());
+            }
+        });
     }
 
     /** 以 QoS 1 发布文本消息。 */
@@ -240,6 +329,94 @@ final class MqttBridge {
                 case REBOOT:
                     Log.i(KioskApp.LOG, "MQTT command: reboot");
                     hub.requestReboot();
+                    break;
+                case URL:
+                    Log.i(KioskApp.LOG, "MQTT command: open url");
+                    hub.requestOpenUrl(cmd.text);
+                    break;
+                case HOME:
+                    Log.i(KioskApp.LOG, "MQTT command: home");
+                    hub.requestHome();
+                    break;
+                case MOTION:
+                    Log.i(KioskApp.LOG, "MQTT command: motion=" + cmd.value);
+                    hub.requestMotion(cmd.value == 1);
+                    break;
+                case STANDBY_BRIGHTNESS:
+                    Log.i(KioskApp.LOG, "MQTT command: standby brightness=" + cmd.value);
+                    hub.requestStandbyBrightness(cmd.value);
+                    break;
+                case DIM_DELAY:
+                    Log.i(KioskApp.LOG, "MQTT command: dim delay=" + cmd.value);
+                    hub.requestDimDelay(cmd.value);
+                    break;
+                case LOCK:
+                    Log.i(KioskApp.LOG, "MQTT command: lock task=" + cmd.value);
+                    hub.requestLockTask(cmd.value == 1);
+                    break;
+                case SCREEN_OFF:
+                    Log.i(KioskApp.LOG, "MQTT command: screen off");
+                    hub.requestScreenOff();
+                    break;
+                case SCREENSHOT:
+                    Log.i(KioskApp.LOG, "MQTT command: screenshot");
+                    hub.requestScreenshot();
+                    break;
+                case NOTIFY:
+                    Log.i(KioskApp.LOG, "MQTT command: notify");
+                    hub.requestNotify(cmd.text);
+                    break;
+                case TTS:
+                    Log.i(KioskApp.LOG, "MQTT command: speak");
+                    hub.requestSpeak(cmd.text);
+                    break;
+                case SCHEDULE:
+                    Log.i(KioskApp.LOG, "MQTT command: schedule=" + cmd.value);
+                    hub.requestSchedule(cmd.value == 1);
+                    break;
+                case DAY_BRIGHTNESS:
+                    Log.i(KioskApp.LOG, "MQTT command: day brightness=" + cmd.value);
+                    hub.requestDayBrightness(cmd.value);
+                    break;
+                case NIGHT_BRIGHTNESS:
+                    Log.i(KioskApp.LOG, "MQTT command: night brightness=" + cmd.value);
+                    hub.requestNightBrightness(cmd.value);
+                    break;
+                case VOLUME:
+                    Log.i(KioskApp.LOG, "MQTT command: volume=" + cmd.value);
+                    hub.requestVolume(cmd.value);
+                    break;
+                case PLAY:
+                    Log.i(KioskApp.LOG, "MQTT command: play audio");
+                    hub.requestPlay(cmd.text);
+                    break;
+                case DAILY:
+                    Log.i(KioskApp.LOG, "MQTT command: daily reload=" + cmd.value);
+                    hub.requestDailyReload(cmd.value == 1);
+                    break;
+                case DAILY_HOUR:
+                    Log.i(KioskApp.LOG, "MQTT command: daily hour=" + cmd.value);
+                    hub.requestDailyHour(cmd.value);
+                    break;
+                case DAILY_MINUTE:
+                    Log.i(KioskApp.LOG, "MQTT command: daily minute=" + cmd.value);
+                    hub.requestDailyMinute(cmd.value);
+                    break;
+                case SLEEP:
+                    Log.i(KioskApp.LOG, "MQTT command: sleep=" + cmd.value);
+                    hub.requestSleep(cmd.value == 1);
+                    break;
+                case SLEEP_START:
+                    Log.i(KioskApp.LOG, "MQTT command: sleep start=" + cmd.value);
+                    hub.requestSleepStart(cmd.value);
+                    break;
+                case SLEEP_END:
+                    Log.i(KioskApp.LOG, "MQTT command: sleep end=" + cmd.value);
+                    hub.requestSleepEnd(cmd.value);
+                    break;
+                case WATCHDOG:
+                    Log.i(KioskApp.LOG, "MQTT command: watchdog=" + cmd.value);
+                    hub.requestWatchdog(cmd.value);
                     break;
                 case HA_ONLINE:
                     Log.i(KioskApp.LOG, "Home Assistant came online, republishing discovery");

@@ -75,4 +75,14 @@ public final class PresenceTracker {
     public boolean presence() {
         return presence;
     }
+
+    /**
+     * 是否适合熄屏：没有人，并且触摸后的观看期已经结束。
+     * 无人后降亮度为 0 时，改用有人状态保持的时长，避免一启动就熄屏。
+     */
+    public boolean quiet(long now) {
+        if (presence) return false;
+        long idleMs = dimDelayMs <= 0 ? holdMs : dimDelayMs;
+        return now - lastActivity >= idleMs;
+    }
 }

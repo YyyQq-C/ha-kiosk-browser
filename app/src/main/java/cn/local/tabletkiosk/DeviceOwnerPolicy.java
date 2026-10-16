@@ -84,6 +84,22 @@ public final class DeviceOwnerPolicy {
         return am != null && am.getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE;
     }
 
+    /** 熄灭屏幕。需要设备所有者，系统会锁住屏幕直到再次唤醒。 */
+    public static boolean screenOff(Context context) {
+        if (!isDeviceOwner(context)) {
+            Log.w(KioskApp.LOG, "Screen off rejected: app is not device owner");
+            return false;
+        }
+        try {
+            Log.i(KioskApp.LOG, "Turning screen off by remote command");
+            context.getSystemService(DevicePolicyManager.class).lockNow();
+            return true;
+        } catch (SecurityException e) {
+            Log.e(KioskApp.LOG, "Screen off failed", e);
+            return false;
+        }
+    }
+
     /** 重启平板；非设备所有者或系统拒绝时返回 false。 */
     public static boolean reboot(Context context) {
         if (!isDeviceOwner(context)) {

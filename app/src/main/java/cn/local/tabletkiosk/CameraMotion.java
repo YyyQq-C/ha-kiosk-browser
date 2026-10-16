@@ -13,6 +13,9 @@ import androidx.camera.core.resolutionselector.ResolutionSelector;
 import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
+import androidx.lifecycle.Lifecycle;
+import androidx.lifecycle.LifecycleOwner;
+import androidx.lifecycle.LifecycleRegistry;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutorService;
@@ -31,6 +34,14 @@ final class CameraMotion {
 
     private final ComponentActivity activity;
     private final Listener listener;
+    private final LifecycleRegistry cameraLifecycle;
+    private final LifecycleOwner cameraOwner = new LifecycleOwner() {
+        /** 摄像头使用独立生命周期，息屏后主界面停止时仍保持打开。 */
+        @Override
+        public Lifecycle getLifecycle() {
+            return cameraLifecycle;
+        }
+    };
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService analyzer = Executors.newSingleThreadExecutor();
     private final MotionDetector detector = new MotionDetector(0);
@@ -40,15 +51,20 @@ final class CameraMotion {
     private long lastFrame;
     private byte[] buffer = new byte[0];
 
-    /** 摄像头随主界面生命周期开关。 */
+    /** 摄像头绑定独立生命周期，不随主界面息屏而关闭。 */
     CameraMotion(ComponentActivity activity, Listener listener) {
         this.activity = activity;
         this.listener = listener;
+        cameraLifecycle = new LifecycleRegistry(cameraOwner);
+        cameraLifecycle.setCurrentState(Lifecycle.State.CREATED);
     }
 
     /** 打开摄像头并开始检测；已打开时只更新灵敏度。 */
     void start(int sensitivity) {
         detector.setSensitivity(sensitivity);
+        if (cameraLifecycle.getCurrentState() != Lifecycle.State.RESUMED) {
+            cameraLifecycle.setCurrentState(Lifecycle.State.RESUMED);
+        }
         if (wanted) return;
         wanted = true;
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(activity);
@@ -68,6 +84,9 @@ final class CameraMotion {
         if (provider != null && analysis != null) provider.unbind(analysis);
         analysis = null;
         detector.reset();
+        if (cameraLifecycle.getCurrentState() != Lifecycle.State.CREATED) {
+            cameraLifecycle.setCurrentState(Lifecycle.State.CREATED);
+        }
     }
 
     /** 释放分析线程，主界面销毁时调用。 */
@@ -93,7 +112,7 @@ final class CameraMotion {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build();
             next.setAnalyzer(analyzer, this::analyze);
-            provider.bindToLifecycle(activity, CameraSelector.DEFAULT_FRONT_CAMERA, next);
+            provider.bindToLifecycle(cameraOwner, CameraSelector.DEFAULT_FRONT_CAMERA, next);
             analysis = next;
             detector.reset();
             Log.i(KioskApp.LOG, "Front camera motion detection started");

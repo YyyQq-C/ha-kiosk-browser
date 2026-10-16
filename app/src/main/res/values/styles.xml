@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 浅色设置页使用同一套强调色，避免系统默认的绿色光标和开关。 -->
+    <style name="Theme.TabletKiosk" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#2F5D62</item>
+        <item name="android:colorControlActivated">#2F5D62</item>
+        <item name="android:colorControlNormal">#8AA0A4</item>
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+    </style>
+</resources>

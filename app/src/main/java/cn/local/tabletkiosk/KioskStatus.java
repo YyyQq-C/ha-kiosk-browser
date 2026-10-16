@@ -13,6 +13,21 @@ public final class KioskStatus {
     public final boolean mqttConnected;
     public final boolean deviceOwner;
     public final boolean lockTask;
+    public final String ip;
+    public final String appVersion;
+    public final String model;
+    public final String androidVersion;
+    public final int volume;
+    public final String wifiSsid;
+    public final int wifiRssi;
+    public final int cpuPercent;
+    public final int memoryPercent;
+    public final int memoryUsedMb;
+    public final int memoryTotalMb;
+    public final boolean memoryLow;
+    public final int storagePercent;
+    public final int appMemoryMb;
+    public final int batteryTempTenths;
 
     /** 由构建器生成快照。 */
     private KioskStatus(Builder b) {
@@ -27,6 +42,21 @@ public final class KioskStatus {
         mqttConnected = b.mqttConnected;
         deviceOwner = b.deviceOwner;
         lockTask = b.lockTask;
+        ip = b.ip == null ? "" : b.ip;
+        appVersion = b.appVersion == null ? "" : b.appVersion;
+        model = b.model == null ? "" : b.model;
+        androidVersion = b.androidVersion == null ? "" : b.androidVersion;
+        volume = b.volume;
+        wifiSsid = b.wifiSsid == null ? "" : b.wifiSsid;
+        wifiRssi = b.wifiRssi;
+        cpuPercent = b.cpuPercent;
+        memoryPercent = b.memoryPercent;
+        memoryUsedMb = b.memoryUsedMb;
+        memoryTotalMb = b.memoryTotalMb;
+        memoryLow = b.memoryLow;
+        storagePercent = b.storagePercent;
+        appMemoryMb = b.appMemoryMb;
+        batteryTempTenths = b.batteryTempTenths;
     }
 
     /** 启动时的初始状态：电量未知、未连接。 */
@@ -53,6 +83,21 @@ public final class KioskStatus {
         b.mqttConnected = mqttConnected;
         b.deviceOwner = deviceOwner;
         b.lockTask = lockTask;
+        b.ip = ip;
+        b.appVersion = appVersion;
+        b.model = model;
+        b.androidVersion = androidVersion;
+        b.volume = volume;
+        b.wifiSsid = wifiSsid;
+        b.wifiRssi = wifiRssi;
+        b.cpuPercent = cpuPercent;
+        b.memoryPercent = memoryPercent;
+        b.memoryUsedMb = memoryUsedMb;
+        b.memoryTotalMb = memoryTotalMb;
+        b.memoryLow = memoryLow;
+        b.storagePercent = storagePercent;
+        b.appMemoryMb = appMemoryMb;
+        b.batteryTempTenths = batteryTempTenths;
         return b;
     }
 
@@ -69,6 +114,21 @@ public final class KioskStatus {
         public boolean mqttConnected = false;
         public boolean deviceOwner = false;
         public boolean lockTask = false;
+        public String ip = "";
+        public String appVersion = "";
+        public String model = "";
+        public String androidVersion = "";
+        public int volume = 0;
+        public String wifiSsid = "";
+        public int wifiRssi = -127;
+        public int cpuPercent = -1;
+        public int memoryPercent = -1;
+        public int memoryUsedMb = -1;
+        public int memoryTotalMb = -1;
+        public boolean memoryLow = false;
+        public int storagePercent = -1;
+        public int appMemoryMb = -1;
+        public int batteryTempTenths = -1000;
 
         /** 生成不可变快照。 */
         public KioskStatus build() {

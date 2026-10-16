@@ -23,8 +23,27 @@ public final class ConfigForm {
     public static final String MQTT_STATE_INTERVAL = "mqtt_state_interval";
     public static final String LAN_PORT = "lan_port";
     public static final String LAN_PASSWORD = "lan_password";
+    public static final String DAY_START_HOUR = "day_start_hour";
+    public static final String NIGHT_START_HOUR = "night_start_hour";
+    public static final String DAY_BRIGHTNESS = "day_brightness";
+    public static final String NIGHT_BRIGHTNESS = "night_brightness";
+    public static final String DAILY_RELOAD_HOUR = "daily_reload_hour";
+    public static final String DAILY_RELOAD_MINUTE = "daily_reload_minute";
+    public static final String SLEEP_START_HOUR = "sleep_start_hour";
+    public static final String SLEEP_END_HOUR = "sleep_end_hour";
+    public static final String VOLUME = "volume";
+    public static final String SETTINGS_PIN = "settings_pin";
+    public static final String WATCHDOG_SECONDS = "watchdog_seconds";
 
     public static final int MIN_LAN_PASSWORD_LENGTH = 8;
+    /** 校验失败时写入 errors 的稳定代码，界面按系统语言翻译。 */
+    public static final String ERR_URL = "url";
+    public static final String ERR_MQTT_HOST = "mqtt_host";
+    public static final String ERR_TOPIC = "topic";
+    public static final String ERR_PREFIX = "prefix";
+    public static final String ERR_LAN_PASSWORD = "lan_password";
+    public static final String ERR_PIN = "pin";
+    public static final String ERR_RANGE_PREFIX = "range:";
     private static final Pattern TOPIC = Pattern.compile("[A-Za-z0-9_\\-]+(/[A-Za-z0-9_\\-]+)*");
 
     private ConfigForm() {
@@ -47,17 +66,25 @@ public final class ConfigForm {
         }
     }
 
+    public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
+                               boolean lanEnabled, boolean lockTaskEnabled) {
+        return parse(text, motionEnabled, mqttEnabled, lanEnabled, lockTaskEnabled, false);
+    }
+
+    public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
+                               boolean lanEnabled, boolean lockTaskEnabled, boolean scheduleEnabled) {
+        return parse(text, motionEnabled, mqttEnabled, lanEnabled, lockTaskEnabled, scheduleEnabled, false, false);
+    }
+
     /**
      * 校验全部输入。
      *
-     * @param text 各文字字段的原始输入，键为本类常量
-     * @param motionEnabled 人体检测开关
-     * @param mqttEnabled MQTT 开关
-     * @param lanEnabled 局域网管理开关
-     * @param lockTaskEnabled 设备所有者锁定模式开关
+     * @param dailyReloadEnabled 每天固定时刻刷新
+     * @param sleepEnabled 夜间熄屏
      */
     public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
-                               boolean lanEnabled, boolean lockTaskEnabled) {
+                               boolean lanEnabled, boolean lockTaskEnabled, boolean scheduleEnabled,
+                               boolean dailyReloadEnabled, boolean sleepEnabled) {
         Map<String, String> errors = new LinkedHashMap<>();
         KioskConfig.Builder b = new KioskConfig.Builder();
 
@@ -66,48 +93,81 @@ public final class ConfigForm {
         String lower = b.homeUrl.toLowerCase(java.util.Locale.ROOT);
         if (!(lower.startsWith("https://") || lower.startsWith("http://")) || b.homeUrl.length() < 10
                 || b.homeUrl.contains(" ")) {
-            errors.put(HOME_URL, "请输入以 http:// 或 https:// 开头的完整网址");
+            errors.put(HOME_URL, ERR_URL);
         }
-        b.idleReloadHours = number(text, IDLE_RELOAD_HOURS, 0, 720, "空闲重新加载", errors);
-        b.retrySeconds = number(text, RETRY_SECONDS, 0, 3600, "失败重试", errors);
+        b.idleReloadHours = number(text, IDLE_RELOAD_HOURS, 0, 720, errors);
+        b.retrySeconds = number(text, RETRY_SECONDS, 0, 3600, errors);
 
         // 亮度与人体检测
-        b.watchBrightness = number(text, WATCH_BRIGHTNESS, 1, 100, "观看亮度", errors);
-        b.standbyBrightness = number(text, STANDBY_BRIGHTNESS, 0, 100, "待机亮度", errors);
-        b.dimDelaySeconds = number(text, DIM_DELAY_SECONDS, 0, 86400, "无人后降亮度", errors);
+        b.watchBrightness = number(text, WATCH_BRIGHTNESS, 1, 100, errors);
+        b.standbyBrightness = number(text, STANDBY_BRIGHTNESS, 0, 100, errors);
+        b.dimDelaySeconds = number(text, DIM_DELAY_SECONDS, 0, 86400, errors);
         b.motionEnabled = motionEnabled;
-        b.motionSensitivity = number(text, MOTION_SENSITIVITY, 0, 100, "动作灵敏度", errors);
-        b.presenceHoldSeconds = number(text, PRESENCE_HOLD_SECONDS, 1, 3600, "有人状态保持", errors);
+        b.motionSensitivity = number(text, MOTION_SENSITIVITY, 0, 100, errors);
+        b.presenceHoldSeconds = number(text, PRESENCE_HOLD_SECONDS, 1, 3600, errors);
 
         // MQTT：关闭时仍保存已填内容，只在开启时要求必填项
         b.mqttEnabled = mqttEnabled;
         b.mqttHost = trimmed(text, MQTT_HOST);
-        b.mqttPort = number(text, MQTT_PORT, 1, 65535, "MQTT 端口", errors);
+        b.mqttPort = number(text, MQTT_PORT, 1, 65535, errors);
         b.mqttUsername = trimmed(text, MQTT_USERNAME);
         b.mqttPassword = raw(text, MQTT_PASSWORD);
         b.mqttBaseTopic = trimmed(text, MQTT_BASE_TOPIC);
         b.mqttDiscoveryPrefix = trimmed(text, MQTT_DISCOVERY_PREFIX);
-        b.mqttStateIntervalSeconds = number(text, MQTT_STATE_INTERVAL, 0, 86400, "上报间隔", errors);
+        b.mqttStateIntervalSeconds = number(text, MQTT_STATE_INTERVAL, 0, 86400, errors);
         if (mqttEnabled && (b.mqttHost.isEmpty() || b.mqttHost.contains(" ") || b.mqttHost.contains("/"))) {
-            errors.put(MQTT_HOST, "开启 MQTT 时需要填写主机名或 IP，不带协议和路径");
+            errors.put(MQTT_HOST, ERR_MQTT_HOST);
         }
         if (!TOPIC.matcher(b.mqttBaseTopic).matches()) {
-            errors.put(MQTT_BASE_TOPIC, "主题只能包含字母、数字、下划线、短横线和中间的 /");
+            errors.put(MQTT_BASE_TOPIC, ERR_TOPIC);
         }
         if (!TOPIC.matcher(b.mqttDiscoveryPrefix).matches()) {
-            errors.put(MQTT_DISCOVERY_PREFIX, "发现前缀只能包含字母、数字、下划线、短横线和中间的 /");
+            errors.put(MQTT_DISCOVERY_PREFIX, ERR_PREFIX);
         }
 
         // 局域网管理：开启时必须设置足够长的密码
         b.lanEnabled = lanEnabled;
-        b.lanPort = number(text, LAN_PORT, 1024, 65535, "局域网端口", errors);
+        b.lanPort = number(text, LAN_PORT, 1024, 65535, errors);
         b.lanPassword = raw(text, LAN_PASSWORD);
         if (lanEnabled && b.lanPassword.length() < MIN_LAN_PASSWORD_LENGTH) {
-            errors.put(LAN_PASSWORD, "开启局域网管理时密码至少 " + MIN_LAN_PASSWORD_LENGTH + " 位");
+            errors.put(LAN_PASSWORD, ERR_LAN_PASSWORD);
         }
 
         b.lockTaskEnabled = lockTaskEnabled;
+        b.scheduleEnabled = scheduleEnabled;
+        b.dayStartHour = number(text, DAY_START_HOUR, 0, 23, errors);
+        b.nightStartHour = number(text, NIGHT_START_HOUR, 0, 23, errors);
+        b.dayBrightness = number(text, DAY_BRIGHTNESS, 1, 100, errors);
+        b.nightBrightness = number(text, NIGHT_BRIGHTNESS, 1, 100, errors);
+        b.dailyReloadEnabled = dailyReloadEnabled;
+        b.dailyReloadHour = number(text, DAILY_RELOAD_HOUR, 0, 23, errors);
+        b.dailyReloadMinute = number(text, DAILY_RELOAD_MINUTE, 0, 59, errors);
+        b.sleepEnabled = sleepEnabled;
+        b.sleepStartHour = number(text, SLEEP_START_HOUR, 0, 23, errors);
+        b.sleepEndHour = number(text, SLEEP_END_HOUR, 0, 23, errors);
+        b.volume = number(text, VOLUME, 0, 100, errors);
+        // 缺键表示这次提交不改设置密码，保持构建器默认空值，由调用方写回已保存的密码
+        if (text.containsKey(SETTINGS_PIN)) {
+            b.settingsPin = trimmed(text, SETTINGS_PIN);
+            if (!b.settingsPin.isEmpty() && !b.settingsPin.matches("\\d{4,8}")) {
+                errors.put(SETTINGS_PIN, ERR_PIN);
+            }
+        }
+        b.watchdogSeconds = number(text, WATCHDOG_SECONDS, 0, 3600, errors);
         return errors.isEmpty() ? new Result(b.build(), errors) : new Result(null, errors);
+    }
+
+    /**
+     * 普通保存没有提交设置密码时，沿用已保存的值。
+     * 缺键解析出来的空字符串不代表用户取消了密码。
+     */
+    public static KioskConfig preserveSettingsPin(KioskConfig parsed, String savedPin) {
+        if (parsed == null) return null;
+        String pin = savedPin == null ? "" : savedPin;
+        if (pin.equals(parsed.settingsPin)) return parsed;
+        KioskConfig.Builder builder = parsed.toBuilder();
+        builder.settingsPin = pin;
+        return builder.build();
     }
 
     /** 把配置转回设置页需要显示的文字。 */
@@ -130,12 +190,22 @@ public final class ConfigForm {
         m.put(MQTT_STATE_INTERVAL, Integer.toString(c.mqttStateIntervalSeconds));
         m.put(LAN_PORT, Integer.toString(c.lanPort));
         m.put(LAN_PASSWORD, c.lanPassword);
+        m.put(DAY_START_HOUR, Integer.toString(c.dayStartHour));
+        m.put(NIGHT_START_HOUR, Integer.toString(c.nightStartHour));
+        m.put(DAY_BRIGHTNESS, Integer.toString(c.dayBrightness));
+        m.put(NIGHT_BRIGHTNESS, Integer.toString(c.nightBrightness));
+        m.put(DAILY_RELOAD_HOUR, Integer.toString(c.dailyReloadHour));
+        m.put(DAILY_RELOAD_MINUTE, Integer.toString(c.dailyReloadMinute));
+        m.put(SLEEP_START_HOUR, Integer.toString(c.sleepStartHour));
+        m.put(SLEEP_END_HOUR, Integer.toString(c.sleepEndHour));
+        m.put(VOLUME, Integer.toString(c.volume));
+        m.put(SETTINGS_PIN, c.settingsPin);
+        m.put(WATCHDOG_SECONDS, Integer.toString(c.watchdogSeconds));
         return m;
     }
 
-    /** 解析整数并检查范围，失败时记录中文提示并返回下限。 */
-    private static int number(Map<String, String> text, String key, int min, int max, String label,
-                              Map<String, String> errors) {
+    /** 解析整数并检查范围，失败时记录 range:下限:上限 并返回下限。 */
+    private static int number(Map<String, String> text, String key, int min, int max, Map<String, String> errors) {
         String value = trimmed(text, key);
         try {
             int parsed = Integer.parseInt(value);
@@ -143,7 +213,7 @@ public final class ConfigForm {
         } catch (NumberFormatException ignored) {
             // 非数字与越界使用同一条提示
         }
-        errors.put(key, label + "请输入 " + min + " 到 " + max + " 之间的整数");
+        errors.put(key, ERR_RANGE_PREFIX + min + ":" + max);
         return min;
     }
 

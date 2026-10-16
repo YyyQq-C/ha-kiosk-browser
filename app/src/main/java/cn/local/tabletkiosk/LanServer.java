@@ -152,6 +152,71 @@ final class LanServer {
                 if (value == null) return new Reply(400, "{\"ok\":false,\"error\":\"brightness must be 0-100\"}", null);
                 hub.requestWatchBrightness(value);
                 return new Reply(200, "{\"ok\":true,\"watch_brightness\":" + value + "}", null);
+            case "/url":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                String page = textBody(req);
+                if (MqttCommands.parse(new MqttTopics("x", "x", "x"), "x/x/cmd/url", page).type != MqttCommands.Type.URL) {
+                    return new Reply(400, "{\"ok\":false,\"error\":\"url must start with http:// or https://\"}", null);
+                }
+                hub.requestOpenUrl(page.trim());
+                return new Reply(200, OK, null);
+            case "/home":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                hub.requestHome();
+                return new Reply(200, OK, null);
+            case "/motion":
+                return switchRoute(req, hub::requestMotion);
+            case "/lock":
+                return switchRoute(req, hub::requestLockTask);
+            case "/schedule":
+                return switchRoute(req, hub::requestSchedule);
+            case "/standby-brightness":
+                return numberRoute(req, 0, 100, hub::requestStandbyBrightness, "standby_brightness");
+            case "/dim-delay":
+                return numberRoute(req, 0, 86400, hub::requestDimDelay, "dim_delay");
+            case "/day-brightness":
+                return numberRoute(req, 1, 100, hub::requestDayBrightness, "day_brightness");
+            case "/night-brightness":
+                return numberRoute(req, 1, 100, hub::requestNightBrightness, "night_brightness");
+            case "/screen-off":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                if (!hub.status().deviceOwner) {
+                    return new Reply(409, "{\"ok\":false,\"error\":\"device owner required\"}", null);
+                }
+                hub.requestScreenOff();
+                return new Reply(200, OK, null);
+            case "/screenshot":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                hub.requestScreenshot();
+                return new Reply(200, OK, null);
+            case "/notify":
+                return textRoute(req, hub::requestNotify);
+            case "/say":
+                return textRoute(req, hub::requestSpeak);
+            case "/volume":
+                return numberRoute(req, 0, 100, hub::requestVolume, "volume");
+            case "/play":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                String audio = textBody(req);
+                if (MqttCommands.parse(new MqttTopics("x", "x", "x"), "x/x/cmd/play", audio).type != MqttCommands.Type.PLAY) {
+                    return new Reply(400, "{\"ok\":false,\"error\":\"audio url must start with http:// or https://\"}", null);
+                }
+                hub.requestPlay(audio.trim());
+                return new Reply(200, OK, null);
+            case "/daily":
+                return switchRoute(req, hub::requestDailyReload);
+            case "/daily-hour":
+                return numberRoute(req, 0, 23, hub::requestDailyHour, "daily_hour");
+            case "/daily-minute":
+                return numberRoute(req, 0, 59, hub::requestDailyMinute, "daily_minute");
+            case "/sleep":
+                return switchRoute(req, hub::requestSleep);
+            case "/sleep-start":
+                return numberRoute(req, 0, 23, hub::requestSleepStart, "sleep_start");
+            case "/sleep-end":
+                return numberRoute(req, 0, 23, hub::requestSleepEnd, "sleep_end");
+            case "/watchdog":
+                return numberRoute(req, 0, 3600, hub::requestWatchdog, "watchdog");
             case "/reboot":
                 if (!"POST".equals(req.method)) return methodNotAllowed();
                 if (!hub.status().deviceOwner) {
@@ -167,6 +232,57 @@ final class LanServer {
     /** 方法不对时的响应。 */
     private static Reply methodNotAllowed() {
         return new Reply(405, "{\"ok\":false,\"error\":\"method not allowed\"}", null);
+    }
+
+    /** 开关类命令，正文或 value 接受 ON、OFF、1、0。 */
+    private Reply switchRoute(LanHttp.Request req, java.util.function.Consumer<Boolean> action) {
+        if (!"POST".equals(req.method)) return methodNotAllowed();
+        Boolean on = MqttCommands.parseSwitch(textBody(req));
+        if (on == null) return new Reply(400, "{\"ok\":false,\"error\":\"expected on or off\"}", null);
+        action.accept(on);
+        return new Reply(200, "{\"ok\":true,\"value\":\"" + (on ? "ON" : "OFF") + "\"}", null);
+    }
+
+    /** 整数命令。 */
+    private Reply numberRoute(LanHttp.Request req, int min, int max, java.util.function.IntConsumer action, String name) {
+        if (!"POST".equals(req.method)) return methodNotAllowed();
+        Integer value = integerBody(req);
+        if (value == null || value < min || value > max) {
+            return new Reply(400, "{\"ok\":false,\"error\":\"" + name + " out of range\"}", null);
+        }
+        action.accept(value);
+        return new Reply(200, "{\"ok\":true,\"" + name + "\":" + value + "}", null);
+    }
+
+    /** 文本命令。 */
+    private Reply textRoute(LanHttp.Request req, java.util.function.Consumer<String> action) {
+        if (!"POST".equals(req.method)) return methodNotAllowed();
+        String text = textBody(req).trim();
+        if (text.isEmpty() || text.length() > 200) {
+            return new Reply(400, "{\"ok\":false,\"error\":\"text required\"}", null);
+        }
+        action.accept(text);
+        return new Reply(200, OK, null);
+    }
+
+    /** 取正文，没有正文时用查询参数 value。 */
+    private static String textBody(LanHttp.Request req) {
+        if (req.body != null && !req.body.trim().isEmpty()) return req.body.trim();
+        String value = req.query.get("value");
+        return value == null ? "" : value.trim();
+    }
+
+    /** 从查询参数 value 或正文里的第一个整数取值，0 保持为 0。 */
+    private static Integer integerBody(LanHttp.Request req) {
+        String text = req.query.get("value");
+        if (text == null) text = req.body == null ? "" : req.body;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("-?\\d+").matcher(text);
+        if (!matcher.find()) return null;
+        try {
+            return Integer.parseInt(matcher.group());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 关闭连接并忽略异常。 */

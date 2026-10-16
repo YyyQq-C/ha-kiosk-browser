@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -42,8 +43,8 @@ public final class KioskService extends Service {
         super.onCreate();
         enterForeground();
         hub = KioskHub.get();
-        mqtt = new MqttBridge(hub, new MqttDiscovery.Device(hub.deviceId(), getString(R.string.app_name),
-                Build.MANUFACTURER, Build.MODEL, BuildConfig.VERSION_NAME));
+        mqtt = new MqttBridge(hub, this);
+        hub.setImageSink(mqtt::publishScreenshot);
         lan = new LanServer(hub);
         lanWorker = Executors.newSingleThreadExecutor();
 
@@ -58,9 +59,19 @@ public final class KioskService extends Service {
         Log.i(KioskApp.LOG, "Kiosk service started");
     }
 
+    /** 让通知文案跟随已保存的界面语言。 */
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(AppLocales.wrap(newBase));
+    }
+
     /** 被系统回收后自动重启。 */
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        enterForeground();
+        if (intent != null && AppLocales.ACTION_REFRESH.equals(intent.getAction()) && mqtt != null) {
+            mqtt.republishDiscovery();
+        }
         return START_STICKY;
     }
 
@@ -92,18 +103,28 @@ public final class KioskService extends Service {
         Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent content = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Context localized = AppLocales.wrap(this);
         Notification notification = new Notification.Builder(this, KioskApp.CHANNEL)
                 .setSmallIcon(R.drawable.ic_kiosk)
-                .setContentTitle(getString(R.string.app_name))
-                .setContentText("保持 MQTT 与局域网管理在线")
+                .setContentTitle(localized.getString(R.string.app_name))
+                .setContentText(localized.getString(R.string.notification_text))
                 .setContentIntent(content)
                 .setOngoing(true)
                 .build();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            if (cameraInForeground()) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+            startForeground(NOTIFICATION_ID, notification, type);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
+    }
+
+    /** 人体检测已开且有摄像头权限时，前台服务声明摄像头类型，息屏后才能继续检测。 */
+    private boolean cameraInForeground() {
+        KioskConfig config = hub == null ? null : hub.config();
+        return config != null && config.motionEnabled && config.motionSensitivity > 0
+                && checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** 从电池广播读取电量和充电状态。 */
@@ -116,6 +137,8 @@ public final class KioskService extends Service {
             b.battery = battery.percent;
             b.charging = battery.charging;
             b.chargeState = battery.state;
+            b.batteryTempTenths = intent.hasExtra(BatteryManager.EXTRA_TEMPERATURE)
+                    ? intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1000) : -1000;
             return b;
         });
     }
@@ -129,5 +152,6 @@ public final class KioskService extends Service {
     private void onConfigChanged(KioskConfig config) {
         mqtt.apply(config);
         lanWorker.execute(() -> lan.apply(config));
+        enterForeground();
     }
 }
