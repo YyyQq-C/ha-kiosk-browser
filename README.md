@@ -1,8 +1,8 @@
-# 居家屏幕（ha-kiosk-browser）
+# HA 智能面板（ha-kiosk-browser）
 
 [English](README.en.md)
 
-Android 全屏网页展示应用，用于在平板上常驻显示 Home Assistant 页面。最低 Android 11（minSdk 30）。当前源码版本是 `versionName` 1.0.22、`versionCode` 23，以 `app/build.gradle` 为准。开发时对照的设备是联想小新 Pad 2022（TB128FU，Android 12），真机效果仍需自行验证。
+Android 全屏网页展示应用，用于在平板上常驻显示 Home Assistant 页面。最低 Android 11（minSdk 30）。当前源码版本是 `versionName` 1.0.25、`versionCode` 26，以 `app/build.gradle` 为准。开发时对照的设备是联想小新 Pad 2022（TB128FU，Android 12），真机效果仍需自行验证。
 
 ## 许可
 
@@ -36,7 +36,7 @@ Android 全屏网页展示应用，用于在平板上常驻显示 Home Assistant
 
 从左边缘滑出设置。大部分字段在离开输入框时保存，开关一拨就保存，没有全局保存按钮。填错的项会标出来，不会写入。
 
-百分比用拖动条，松手后保存。小时是 0–23 的选择器，不能手输，改完立即保存。分钟仍是输入框，范围 0–59。有标题的设置卡片右上角有问号，点开是这张卡片的说明。
+百分比用拖动条，松手后保存。小时只显示当前值，点一下才弹出 0–23 的选择器，不能手输，确认后保存，取消不改。分钟仍是输入框，范围 0–59。有标题的设置卡片右上角有问号，点开是这张卡片的说明。
 
 设置密码单独点「保存密码」才写入，不会在失焦时保存。它只保护本机设置面板，不用于 MQTT 或局域网接口。必须是 4–8 位数字；两个新密码框都留空表示不设门，左边缘滑出直接进入设置。已经设置过时，修改或清除都要先验证旧密码。已保存的密码不会回填到输入框。
 
@@ -85,7 +85,7 @@ adb shell dpm set-device-owner cn.local.tabletkiosk/.KioskAdminReceiver
 
 这里连接的是 MQTT 代理，不是 Home Assistant 网页地址。网页地址填在设置的首页网址。
 
-在设置中开启 MQTT，填写代理主机、端口（默认 1883，可填 1–65535）、账号和密码。代理没有认证时账号和密码留空。基础主题默认 `home_kiosk`，发现前缀默认 `homeassistant`，要和 Home Assistant MQTT 集成的发现前缀一致。中文界面下设备名是「居家屏幕」，英文界面是 “Home Screen”。
+在设置中开启 MQTT，填写代理主机、端口（默认 1883，可填 1–65535）、账号和密码。代理没有认证时账号和密码留空。基础主题默认 `home_kiosk`，发现前缀默认 `homeassistant`，要和 Home Assistant MQTT 集成的发现前缀一致。中文界面下设备名是「HA 智能面板」，英文界面是 “HAPanel”。
 
 主题（`<base>` 默认 `home_kiosk`，`<prefix>` 默认 `homeassistant`，`<id>` 为本机首次生成并保存的 `kiosk_` 加 8 位十六进制）：
 

@@ -1,8 +1,8 @@
-# Home Screen (ha-kiosk-browser)
+# HAPanel (ha-kiosk-browser)
 
 [中文](README.md)
 
-An Android full-screen web app for keeping a Home Assistant page on a tablet. Minimum Android 11 (minSdk 30). The source currently has `versionName` 1.0.22 and `versionCode` 23 in `app/build.gradle`. It was developed against a Lenovo Xiaoxin Pad 2022 (TB128FU, Android 12). Behavior on a real device still needs to be checked by you.
+An Android full-screen web app for keeping a Home Assistant page on a tablet. Minimum Android 11 (minSdk 30). The source currently has `versionName` 1.0.25 and `versionCode` 26 in `app/build.gradle`. It was developed against a Lenovo Xiaoxin Pad 2022 (TB128FU, Android 12). Behavior on a real device still needs to be checked by you.
 
 ## License
 
@@ -36,7 +36,7 @@ There is no remote click injection, barcode scanning, printing, or multiple tabs
 
 Swipe in from the left edge to open settings. Most fields save when they lose focus, and switches save immediately. There is no global save button. An invalid value is marked and is not stored.
 
-Percentages use a slider and save when it is released. Hours are a 0–23 picker and cannot be typed; they save as soon as the value changes. Minutes stay in a text field, from 0 to 59. A settings card that has a title also has a question-mark help button.
+Percentages use a slider and save when it is released. Hours show only the current value. Tap to open a 0–23 picker; it cannot be typed. Confirm saves, and cancel leaves the value unchanged. Minutes stay in a text field, from 0 to 59. A settings card that has a title also has a question-mark help button.
 
 The settings PIN is written only by Save password. It is not saved on blur. It protects only the local settings panel, not MQTT or the LAN API. It must be 4–8 digits. Leaving both new-password fields empty means no gate, so the left-edge swipe opens settings directly. Changing or clearing a saved PIN requires the current PIN first. A saved PIN is not filled back into the fields.
 
@@ -85,7 +85,7 @@ Notes:
 
 This connects to an MQTT broker, not to the Home Assistant web address. Put the web address in the home URL.
 
-Turn MQTT on in settings and enter the broker host, port (default 1883, allowed 1–65535), username, and password. Leave both blank when the broker has no authentication. The base topic defaults to `home_kiosk`. The discovery prefix defaults to `homeassistant` and must match the MQTT integration in Home Assistant. The device name is 居家屏幕 in Chinese and Home Screen in English.
+Turn MQTT on in settings and enter the broker host, port (default 1883, allowed 1–65535), username, and password. Leave both blank when the broker has no authentication. The base topic defaults to `home_kiosk`. The discovery prefix defaults to `homeassistant` and must match the MQTT integration in Home Assistant. The device name is HA 智能面板 in Chinese and HAPanel in English.
 
 Topics (`<base>` defaults to `home_kiosk`, `<prefix>` defaults to `homeassistant`, and `<id>` is `kiosk_` plus 8 hex digits, created once and stored on the device):
 

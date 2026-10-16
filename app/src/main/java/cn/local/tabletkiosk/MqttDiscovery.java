@@ -3,7 +3,7 @@ package cn.local.tabletkiosk;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 生成 Home Assistant MQTT 自动发现配置；全部实体挂在同一台设备“居家屏幕”下。 */
+/** 生成 Home Assistant MQTT 自动发现配置；全部实体挂在同一台设备“HA 智能面板”下。 */
 final class MqttDiscovery {
     /** 设备信息。 */
     static final class Device {

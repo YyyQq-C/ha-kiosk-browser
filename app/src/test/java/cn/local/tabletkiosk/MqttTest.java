@@ -14,7 +14,7 @@ import org.junit.Test;
 public class MqttTest {
     private final MqttTopics topics = new MqttTopics("home_kiosk", "homeassistant", "kiosk_ab12cd34");
     private final MqttDiscovery.Device device =
-            new MqttDiscovery.Device("kiosk_ab12cd34", "居家屏幕", "LENOVO", "TB128FU", "1.0.0");
+            new MqttDiscovery.Device("kiosk_ab12cd34", "HA 智能面板", "LENOVO", "TB128FU", "1.0.0");
     private final MqttDiscovery.Labels labels = new MqttDiscovery.Labels(
             "亮屏", "有人靠近", "电量", "充电中", "充电状态", "当前亮度", "设置亮度", "当前网址", "立即刷新", "唤醒屏幕", "重启平板",
             "当前待机", "人体检测", "待机亮度", "无人后降亮度", "锁定模式", "熄屏", "回到首页", "打开页面", "屏幕截图", "画面通知", "语音播报",
@@ -117,7 +117,7 @@ public class MqttTest {
         for (MqttDiscovery.Message m : messages) {
             if (m.payload.isEmpty()) continue;
             assertTrue(m.payload.contains("\"identifiers\":[\"kiosk_ab12cd34\"]"));
-            assertTrue(m.payload.contains("\"name\":\"居家屏幕\""));
+            assertTrue(m.payload.contains("\"name\":\"HA 智能面板\""));
             assertTrue(m.payload.contains("\"availability_topic\":\"home_kiosk/kiosk_ab12cd34/availability\""));
         }
         assertTrue(payloadOf(messages, "homeassistant/binary_sensor/kiosk_ab12cd34/screen_on/config")

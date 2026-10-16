@@ -1,6 +1,10 @@
 package cn.local.tabletkiosk;
 
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -24,7 +28,12 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -88,8 +97,8 @@ final class SettingsPanel extends FrameLayout {
     private final Map<String, EditText> fields = new HashMap<>();
     /** 百分比拖动条。保存时写回文本，避免这些项从输入框地图消失后被当成缺省。 */
     private final Map<String, PercentBar> percents = new HashMap<>();
-    /** 0 到 23 点的选择器。保存时写回当前小时，避免这些项从输入框地图消失后被重置成 0。 */
-    private final Map<String, HourPicker> hours = new HashMap<>();
+    /** 0 到 23 点。表单只显示当前小时；保存时写回，避免这些项从输入框地图消失后被重置成 0。 */
+    private final Map<String, HourField> hours = new HashMap<>();
     private Switch motionSwitch;
     private Switch scheduleSwitch;
     private Switch dailySwitch;
@@ -111,13 +120,12 @@ final class SettingsPanel extends FrameLayout {
     private EditText pinCurrent;
     private EditText pinNew;
     private EditText pinConfirm;
-    private FrameLayout helpLayer;
-    private LinearLayout helpCard;
-    private ScrollView helpScroll;
-    private TextView helpTitleView;
-    private TextView helpBodyView;
+    /** 卡片说明。挂在 Activity 的 Dialog 窗口上，不放进会被圆角裁剪的设置抽屉。 */
+    private Dialog helpDialog;
     private boolean open;
     private boolean filling;
+    /** 点小时后弹出的选择框。收起面板时关掉，未确认的滚动不写回。 */
+    private AlertDialog hourDialog;
 
     /** 构建面板视图，初始隐藏。 */
     SettingsPanel(Context context, KioskHub hub, Host host) {
@@ -155,7 +163,6 @@ final class SettingsPanel extends FrameLayout {
         addView(panel, new LayoutParams(dp(600), LayoutParams.MATCH_PARENT, Gravity.START));
 
         buildForm(context);
-        buildHelp(context);
         setVisibility(GONE);
     }
 
@@ -197,6 +204,8 @@ final class SettingsPanel extends FrameLayout {
     void hide() {
         if (!open) return;
         dismissHelp();
+        // 未点确认的小时选择直接丢掉，随后 commit 仍用表单上的当前小时
+        if (hourDialog != null) hourDialog.dismiss();
         open = false;
         commit();
         InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
@@ -206,6 +215,14 @@ final class SettingsPanel extends FrameLayout {
             setVisibility(GONE);
             host.onPanelClosed();
         }).start();
+    }
+
+    /** 面板从窗口移除时关掉说明，避免对话框留在已经销毁的界面上。 */
+    @Override
+    protected void onDetachedFromWindow() {
+        dismissHelp();
+        if (hourDialog != null) hourDialog.dismiss();
+        super.onDetachedFromWindow();
     }
 
     /** 刷新面板顶部状态、设备所有者说明和权限按钮。 */
@@ -488,7 +505,7 @@ final class SettingsPanel extends FrameLayout {
         for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
             e.getValue().setValue(percentOrMin(text.get(e.getKey()), e.getValue()));
         }
-        for (Map.Entry<String, HourPicker> e : hours.entrySet()) {
+        for (Map.Entry<String, HourField> e : hours.entrySet()) {
             e.getValue().setHour(hourValue(text.get(e.getKey())));
         }
         motionSwitch.setChecked(c.motionEnabled);
@@ -514,8 +531,8 @@ final class SettingsPanel extends FrameLayout {
         for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
             text.put(e.getKey(), e.getValue().text());
         }
-        // 小时选择器不在输入框地图里，必须写入当前选中的小时
-        for (Map.Entry<String, HourPicker> e : hours.entrySet()) {
+        // 小时不在输入框地图里，必须写入当前选中的小时，不能落回默认 0
+        for (Map.Entry<String, HourField> e : hours.entrySet()) {
             text.put(e.getKey(), Integer.toString(e.getValue().getHour()));
         }
         ConfigForm.Result result = ConfigForm.parse(text, motionSwitch.isChecked(), mqttSwitch.isChecked(),
@@ -608,7 +625,7 @@ final class SettingsPanel extends FrameLayout {
     private LinearLayout pinColumn(Context context, String label) {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
-        TextView l = text(context, label, 12, MUTED, false);
+        TextView l = text(context, label, 12, MUTED, true);
         l.setPadding(dp(2), dp(8), dp(2), dp(6));
         column.addView(l);
         EditText input = new EditText(context);
@@ -670,83 +687,110 @@ final class SettingsPanel extends FrameLayout {
         return hit;
     }
 
-    /** 盖住设置面板的说明层。正文可滚动，关闭按钮固定在卡片底部。 */
-    private void buildHelp(Context context) {
-        helpLayer = new FrameLayout(context);
-        helpLayer.setVisibility(GONE);
-        View dim = new View(context);
-        dim.setBackgroundColor(Color.argb(150, 0, 0, 0));
-        dim.setOnClickListener(v -> dismissHelp());
-        helpLayer.addView(dim, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-
-        helpCard = new LinearLayout(context);
-        helpCard.setOrientation(LinearLayout.VERTICAL);
-        helpCard.setClickable(true);
-        helpCard.setPadding(dp(20), dp(18), dp(20), dp(16));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(22));
-        bg.setColor(Color.WHITE);
-        helpCard.setBackground(bg);
-        helpCard.setElevation(dp(8));
-
-        helpTitleView = text(context, "", 18, TEXT, true);
-        helpCard.addView(helpTitleView);
-
-        helpScroll = new ScrollView(context);
-        helpScroll.setFillViewport(false);
-        helpScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        helpBodyView = text(context, "", 15, TEXT, false);
-        helpBodyView.setLineSpacing(dp(3), 1f);
-        helpBodyView.setPadding(0, dp(12), 0, dp(8));
-        helpScroll.addView(helpBodyView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        helpCard.addView(helpScroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(120)));
-
-        Button close = button(context, context.getString(R.string.close), this::dismissHelp, true);
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        closeLp.topMargin = dp(8);
-        helpCard.addView(close, closeLp);
-
-        LayoutParams cardLp = new LayoutParams(dp(440), LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        helpLayer.addView(helpCard, cardLp);
-        addView(helpLayer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
-    }
-
-    /** 按当前界面语言显示某一张卡片的说明。 */
+    /** 按当前界面语言显示某一张卡片的说明。窗口属于 Activity，盖住设置抽屉和后面的网页。 */
     private void showHelp(String title, String body) {
         InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
         if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
-        helpTitleView.setText(title);
-        helpBodyView.setText(body);
-        helpScroll.scrollTo(0, 0);
-        helpLayer.setVisibility(VISIBLE);
-        helpLayer.bringToFront();
-        helpCard.post(this::clampHelpHeight);
+        Activity activity = findActivity();
+        if (activity == null || activity.isFinishing()) {
+            Log.w(KioskApp.LOG, "Help dialog skipped because the activity is not available");
+            return;
+        }
+        dismissHelp();
+
+        int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+        int screenH = activity.getResources().getDisplayMetrics().heightPixels;
+        int width = Math.min(dp(460), Math.max(dp(280), screenW - dp(48)));
+        int inner = Math.max(dp(120), width - dp(40));
+        TextView bodyView = text(activity, body, 15, TEXT, false);
+        bodyView.setLineSpacing(dp(3), 1f);
+        bodyView.setPadding(0, dp(12), 0, dp(8));
+        bodyView.measure(View.MeasureSpec.makeMeasureSpec(inner, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int maxCard = Math.max(dp(240), (int) (screenH * 0.8f));
+        int maxBody = Math.max(dp(96), maxCard - dp(130));
+
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setFillViewport(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.addView(bodyView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.min(bodyView.getMeasuredHeight(), maxBody));
+
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setClickable(true);
+        card.setPadding(dp(20), dp(18), dp(20), dp(16));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(22));
+        bg.setColor(Color.WHITE);
+        card.setBackground(bg);
+        card.addView(text(activity, title, 18, TEXT, true));
+        card.addView(scroll, scrollLp);
+        Button close = button(activity, activity.getString(R.string.close), this::dismissHelp, true);
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dp(8);
+        card.addView(close, closeLp);
+
+        FrameLayout layer = new FrameLayout(activity);
+        View dim = new View(activity);
+        dim.setBackgroundColor(Color.argb(150, 0, 0, 0));
+        dim.setOnClickListener(v -> dismissHelp());
+        layer.addView(dim, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        layer.addView(card, new LayoutParams(width, LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+        Dialog dialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar);
+        dialog.setCancelable(true);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setContentView(layer);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+            WindowManager.LayoutParams attrs = window.getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            window.setAttributes(attrs);
+            WindowCompat.setDecorFitsSystemWindows(window, false);
+        }
+        dialog.setOnShowListener(d -> hideDialogBars(dialog));
+        dialog.setOnDismissListener(d -> {
+            if (helpDialog == d) helpDialog = null;
+        });
+        helpDialog = dialog;
+        try {
+            dialog.show();
+        } catch (RuntimeException ex) {
+            helpDialog = null;
+            Log.w(KioskApp.LOG, "Failed to show help dialog", ex);
+        }
     }
 
-    /** 说明太长时只让正文滚动，关闭按钮留在卡片底部。 */
-    private void clampHelpHeight() {
-        if (helpLayer.getVisibility() != VISIBLE) return;
-        int width = Math.min(dp(460), Math.max(dp(280), getWidth() - dp(48)));
-        int inner = width - dp(40);
-        helpBodyView.measure(View.MeasureSpec.makeMeasureSpec(Math.max(inner, dp(120)), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        int maxCard = Math.max(dp(240), (int) (getHeight() * 0.8f));
-        int maxBody = Math.max(dp(96), maxCard - dp(130));
-        LinearLayout.LayoutParams scrollLp = (LinearLayout.LayoutParams) helpScroll.getLayoutParams();
-        scrollLp.width = LinearLayout.LayoutParams.MATCH_PARENT;
-        scrollLp.height = Math.min(helpBodyView.getMeasuredHeight(), maxBody);
-        helpScroll.setLayoutParams(scrollLp);
-        LayoutParams cardLp = (LayoutParams) helpCard.getLayoutParams();
-        cardLp.width = width;
-        cardLp.height = LayoutParams.WRAP_CONTENT;
-        cardLp.gravity = Gravity.CENTER;
-        helpCard.setLayoutParams(cardLp);
+    /** 说明对话框也保持全屏沉浸，避免压过设置面板时把系统栏叫出来。 */
+    private void hideDialogBars(Dialog dialog) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+        if (controller == null) return;
+        controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        controller.hide(WindowInsetsCompat.Type.systemBars());
+    }
+
+    /** 从当前上下文找到承载设置面板的 Activity。 */
+    private Activity findActivity() {
+        Context context = getContext();
+        while (context instanceof ContextWrapper) {
+            if (context instanceof Activity) return (Activity) context;
+            context = ((ContextWrapper) context).getBaseContext();
+        }
+        return null;
     }
 
     /** 关掉说明，不关闭设置面板。 */
     private void dismissHelp() {
-        if (helpLayer != null) helpLayer.setVisibility(GONE);
+        Dialog dialog = helpDialog;
+        helpDialog = null;
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
     }
 
     /** 创建一张圆角分组卡片并记为当前容器。 */
@@ -788,7 +832,7 @@ final class SettingsPanel extends FrameLayout {
     private LinearLayout fieldColumn(Context context, String key, String label, int inputType) {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
-        TextView l = text(context, label, 12, MUTED, false);
+        TextView l = text(context, label, 12, MUTED, true);
         l.setPadding(dp(2), dp(8), dp(2), dp(6));
         column.addView(l);
         EditText input = new EditText(context);
@@ -816,18 +860,54 @@ final class SettingsPanel extends FrameLayout {
         return column;
     }
 
-    /** 0 到 23 点的选择列。标签沿用现有文案，数值只能加减或滑动。 */
+    /** 0 到 23 点的显示列。表单只放当前小时，样式与旁边的输入框一致；点一下才弹出选择。 */
     private LinearLayout hourColumn(Context context, String key, String label) {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
-        TextView l = text(context, label, 12, MUTED, false);
+        TextView l = text(context, label, 12, MUTED, true);
         l.setPadding(dp(2), dp(8), dp(2), dp(6));
         column.addView(l);
-        HourPicker picker = new HourPicker(context);
-        picker.setOnValueChangedListener((spinner, oldVal, newVal) -> commit());
-        column.addView(picker, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(168)));
-        hours.put(key, picker);
+        TextView value = text(context, "0", 16, TEXT, false);
+        value.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(14));
+        bg.setColor(FIELD);
+        value.setBackground(bg);
+        value.setClickable(true);
+        value.setFocusable(true);
+        value.setMinHeight(dp(48));
+        value.setGravity(Gravity.CENTER_VERTICAL);
+        HourField field = new HourField(value);
+        value.setOnClickListener(v -> openHourDialog(context, label, field));
+        column.addView(value, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        hours.put(key, field);
         return column;
+    }
+
+    /** 弹出 0 到 23 的滚轮。确认后写回并走现有保存；取消、点外侧或返回都不改表单上的小时。 */
+    private void openHourDialog(Context context, String label, HourField field) {
+        if (hourDialog != null && hourDialog.isShowing()) hourDialog.dismiss();
+        HourPicker picker = new HourPicker(context);
+        picker.setHour(field.getHour());
+        LinearLayout wrap = new LinearLayout(context);
+        wrap.setPadding(dp(12), dp(8), dp(12), 0);
+        wrap.addView(picker, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(180)));
+        hourDialog = new AlertDialog.Builder(context)
+                .setTitle(label)
+                .setView(wrap)
+                .setPositiveButton(R.string.pin_confirm, (dialog, which) -> {
+                    field.setHour(picker.getHour());
+                    commit();
+                })
+                .setNegativeButton(R.string.cancel, (dialog, which) -> dialog.cancel())
+                .create();
+        hourDialog.setOnShowListener(dialog -> {
+            if (hourDialog.getWindow() != null) {
+                hourDialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            }
+        });
+        hourDialog.show();
     }
 
     /** 把配置里的小时收成 0 到 23。选择器本身不会给出这个范围以外的值。 */
@@ -871,7 +951,7 @@ final class SettingsPanel extends FrameLayout {
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
         head.setPadding(dp(2), dp(8), dp(2), 0);
-        TextView name = text(context, label, 12, MUTED, false);
+        TextView name = text(context, label, 12, MUTED, true);
         name.setLineSpacing(dp(2), 1f);
         head.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         TextView value = text(context, min + "%", 14, ACCENT, true);
@@ -980,7 +1060,7 @@ final class SettingsPanel extends FrameLayout {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(dp(52));
         row.setPadding(dp(2), dp(8), 0, dp(4));
-        TextView l = text(context, label, 15, TEXT, false);
+        TextView l = text(context, label, 15, TEXT, true);
         l.setLineSpacing(dp(2), 1f);
         row.addView(l, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Switch s = new Switch(context);
@@ -1233,8 +1313,30 @@ final class SettingsPanel extends FrameLayout {
         }
     }
 
+    /** 表单上的小时：只记住并显示当前值，不放滚轮。 */
+    private static final class HourField {
+        final TextView value;
+        int hour;
+
+        /** 绑定显示用的文字。初始小时由打开面板时的配置填入。 */
+        HourField(TextView value) {
+            this.value = value;
+        }
+
+        /** 当前选中的小时。保存其他项时也读这个值。 */
+        int getHour() {
+            return hour;
+        }
+
+        /** 写入 0 到 23，并刷新文字。不在这里保存。 */
+        void setHour(int next) {
+            hour = next < 0 ? 0 : Math.min(next, 23);
+            value.setText(Integer.toString(hour));
+        }
+    }
+
     /**
-     * 0 到 23 的小时选择器。
+     * 对话框里的 0 到 23 小时滚轮。
      * 中间数字不能获得焦点，也不能弹出键盘，只能加减或滑动。
      */
     private final class HourPicker extends NumberPicker {
@@ -1259,7 +1361,7 @@ final class SettingsPanel extends FrameLayout {
             return getValue();
         }
 
-        /** 打开面板时填入配置。setValue 不会触发保存。 */
+        /** 对话框打开时停在当前小时。setValue 不会写回表单。 */
         void setHour(int hour) {
             setValue(hour < 0 ? 0 : Math.min(hour, 23));
         }
