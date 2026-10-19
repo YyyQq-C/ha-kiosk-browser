@@ -60,6 +60,14 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 Local signing uses `signing/keystore.properties` and the keystore file named there. That directory is ignored and is not committed. Without it, `assembleRelease` produces an unsigned package. The installable package for a release is the APK on the GitHub Release.
 
+Build a signed release APK without merging `main` or creating a tag:
+
+```powershell
+.\release.ps1
+```
+
+Use `.\release.ps1 -Online` when the dependency cache is incomplete. The script verifies the APK signature and copies the package to `dist/ha-kiosk-browser-<versionName>.apk`. `dist/` is not committed.
+
 The first launch asks for the camera permission, then prompts once to ignore battery optimizations. Without device owner, open settings, choose System, then Allow opening at boot, and grant Display over other apps if the page should open after boot.
 
 ## Device owner

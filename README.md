@@ -60,6 +60,14 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 本机签名放在 `signing/keystore.properties` 和对应的 keystore 文件中，目录已被忽略，不会提交。没有这份文件时，`assembleRelease` 生成未签名包。已发布的安装包以 GitHub Release 上的 APK 为准。
 
+打已签名正式包（不合并 `main`，不打 tag）：
+
+```powershell
+.\release.ps1
+```
+
+依赖缓存不够时用 `.\release.ps1 -Online`。脚本会校验 APK 签名，并把包复制到 `dist/ha-kiosk-browser-<versionName>.apk`。`dist/` 不提交。
+
 首次打开会请求摄像头权限，然后提示一次忽略电池优化。未成为设备所有者时，如需开机自动打开界面，请在设置的「系统」分组中点击「允许开机自动打开」，并在系统页面授予「显示在其他应用上层」。
 
 ## 设备所有者

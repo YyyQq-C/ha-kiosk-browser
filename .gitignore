@@ -4,6 +4,7 @@ local.properties
 .idea/
 *.iml
 signing/
+dist/
 *.jks
 *.keystore
 *.p12
