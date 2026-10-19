@@ -12,6 +12,7 @@ public final class KioskConfigStore {
     private static final String BATTERY_PROMPTED = "battery_prompted";
     private static final String HA_TOKEN = "ha_token";
     private static final String SETUP_DONE = "setup_done";
+    private static final String UPDATE_CHECKED = "update_checked_at";
     private final SharedPreferences prefs;
 
     /** 绑定应用私有配置文件。 */
@@ -152,5 +153,15 @@ public final class KioskConfigStore {
     /** 记录电池优化提示已弹出。 */
     public void markBatteryPrompted() {
         prefs.edit().putBoolean(BATTERY_PROMPTED, true).apply();
+    }
+
+    /** 上次自动检查更新的时间，没有检查过返回 0。 */
+    public long updateCheckedAt() {
+        return prefs.getLong(UPDATE_CHECKED, 0L);
+    }
+
+    /** 记下这次自动检查，避免每次打开都访问 GitHub。 */
+    public void markUpdateChecked(long now) {
+        prefs.edit().putLong(UPDATE_CHECKED, now).apply();
     }
 }

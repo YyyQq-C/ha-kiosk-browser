@@ -45,6 +45,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -87,6 +88,9 @@ final class SettingsPanel extends FrameLayout {
 
         /** 首次设置已确认，可以加载首页。 */
         void onSetupFinished();
+
+        /** 手动检查 GitHub 上有没有新的正式包。 */
+        void checkForUpdate();
     }
 
     private static final int TEXT = Color.rgb(22, 40, 44);
@@ -376,6 +380,7 @@ final class SettingsPanel extends FrameLayout {
         startButton = button(context, context.getString(R.string.setup_start), this::finishSetup, true);
         startButton.setVisibility(GONE);
         currentCard.addView(startButton, fullWidth());
+        currentCard.addView(button(context, context.getString(R.string.find_ha), this::findHa, false), fullWidth());
         pair(context,
                 ConfigForm.IDLE_RELOAD_HOURS, context.getString(R.string.idle_reload), InputType.TYPE_CLASS_NUMBER,
                 ConfigForm.RETRY_SECONDS, context.getString(R.string.retry_seconds), InputType.TYPE_CLASS_NUMBER);
@@ -486,6 +491,8 @@ final class SettingsPanel extends FrameLayout {
         fileActions.addView(button(context, context.getString(R.string.export_settings), host::exportSettings, false), weighted());
         fileActions.addView(button(context, context.getString(R.string.import_settings), host::importSettings, false), weighted());
         currentCard.addView(fileActions);
+        currentCard.addView(button(context, context.getString(R.string.check_update), host::checkForUpdate, false),
+                fullWidth());
         currentCard.addView(button(context, context.getString(R.string.open_system_settings), host::openSystemSettings, false),
                 fullWidth());
         addFooter(context);
@@ -1200,6 +1207,50 @@ final class SettingsPanel extends FrameLayout {
         buildForm(ui);
         populate(hub.config());
         applySetupChrome();
+    }
+
+    /** 扫描局域网 8123，点一项就写入首页地址。 */
+    private void findHa() {
+        Context context = ui == null ? getContext() : ui;
+        Dialog dialog = new Dialog(getContext());
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, pad, pad, pad);
+        TextView hint = text(context, context.getString(R.string.find_ha_hint), 14, MUTED, false);
+        hint.setLineSpacing(dp(3), 1f);
+        box.addView(hint, fullWidth());
+        TextView status = text(context, context.getString(R.string.find_ha_loading), 15, TEXT, false);
+        box.addView(status, fullWidth());
+        LinearLayout list = new LinearLayout(context);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView scrollList = new ScrollView(context);
+        scrollList.addView(list);
+        box.addView(scrollList, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(240)));
+        dialog.setContentView(box);
+        dialog.show();
+        String local = NetUtil.localIpv4(context);
+        new Thread(() -> {
+            List<String> found = HaDiscovery.scan(local);
+            post(() -> {
+                if (!dialog.isShowing()) return;
+                list.removeAllViews();
+                if (found.isEmpty()) {
+                    status.setText(HaDiscovery.subnetPrefix(local) == null
+                            ? R.string.find_ha_no_lan : R.string.find_ha_empty);
+                    return;
+                }
+                status.setText(R.string.find_ha_done);
+                for (String url : found) {
+                    list.addView(button(context, url, () -> {
+                        EditText home = fields.get(ConfigForm.HOME_URL);
+                        if (home != null) home.setText(url);
+                        commit();
+                        dialog.dismiss();
+                    }, false), fullWidth());
+                }
+            });
+        }, "ha-discovery").start();
     }
 
     /** 打开仪表盘选择。令牌只保存在本机。 */

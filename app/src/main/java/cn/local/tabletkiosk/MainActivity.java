@@ -1,6 +1,7 @@
 package cn.local.tabletkiosk;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -12,6 +13,8 @@ import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.widget.Toast;
 import java.io.InputStream;
@@ -146,7 +149,18 @@ public final class MainActivity extends ComponentActivity
     private WebView web;
     private TextView notice;
     private View offlinePage;
+    private TextView offlineTitle;
     private TextView offlineDetail;
+    private FailKind failKind = FailKind.SITE;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private boolean networkWasDown;
+
+    /** 等待页要区分的失败原因。 */
+    private enum FailKind {
+        NETWORK,
+        SITE,
+        SSL
+    }
     private TextToSpeech tts;
     private MediaPlayer player;
     private FrameLayout pinGate;
@@ -232,6 +246,7 @@ public final class MainActivity extends ComponentActivity
             purgeOnNextFinish = true;
             loadFresh(config.homeUrl);
             firstRunPrompts();
+            checkForUpdate(false);
         }
 
         hub.setController(this);
@@ -267,6 +282,7 @@ public final class MainActivity extends ComponentActivity
         handler.post(tick);
         updateInteractive();
         syncCamera();
+        watchNetwork();
     }
 
     /** 每次回到前台重新隐藏系统栏并同步锁定模式。 */
@@ -283,6 +299,7 @@ public final class MainActivity extends ComponentActivity
     protected void onStop() {
         started = false;
         CookieManager.getInstance().flush();
+        unwatchNetwork();
         super.onStop();
     }
 
@@ -447,7 +464,7 @@ public final class MainActivity extends ComponentActivity
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
                 onLoadFailure("Main frame load failed: code=" + error.getErrorCode() + " " + error.getDescription(),
-                        request.getUrl().toString());
+                        request.getUrl().toString(), FailKind.SITE);
             }
         }
 
@@ -455,7 +472,8 @@ public final class MainActivity extends ComponentActivity
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
             if (request.isForMainFrame() && response.getStatusCode() >= 500) {
-                onLoadFailure("Main frame HTTP error: " + response.getStatusCode(), request.getUrl().toString());
+                onLoadFailure("Main frame HTTP error: " + response.getStatusCode(), request.getUrl().toString(),
+                        FailKind.SITE);
             }
         }
 
@@ -464,7 +482,7 @@ public final class MainActivity extends ComponentActivity
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
             Log.e(KioskApp.LOG, "SSL error rejected: primary=" + error.getPrimaryError());
             handler.cancel();
-            onLoadFailure("SSL error rejected: primary=" + error.getPrimaryError(), error.getUrl());
+            onLoadFailure("SSL error rejected: primary=" + error.getPrimaryError(), error.getUrl(), FailKind.SSL);
         }
 
         /** 渲染进程崩溃或被回收时重建网页，避免整个应用退出。 */
@@ -480,14 +498,16 @@ public final class MainActivity extends ComponentActivity
         }
     }
 
-    /** 主页面失败时盖上本地等待页，并继续重试。设置里的重试秒数为 0 时按 30 秒。 */
-    private void onLoadFailure(String reason, String url) {
+    /** 主页面失败时盖上本地等待页，并继续重试。证书错误不自动重试。 */
+    private void onLoadFailure(String reason, String url, FailKind kind) {
         mainFrameError = true;
         stopPullRefresh();
         Log.w(KioskApp.LOG, reason);
         if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) offlineUrl = url;
-        showOffline(offlineUrl == null || offlineUrl.isEmpty() ? config.homeUrl : offlineUrl);
-        if (retryPending) return;
+        FailKind shown = kind == FailKind.SSL ? FailKind.SSL
+                : (NetUtil.hasNetwork(this) ? FailKind.SITE : FailKind.NETWORK);
+        showOffline(offlineUrl == null || offlineUrl.isEmpty() ? config.homeUrl : offlineUrl, shown);
+        if (retryPending || shown == FailKind.SSL) return;
         int seconds = config.retrySeconds > 0 ? config.retrySeconds : 30;
         retryPending = true;
         handler.postDelayed(retry, seconds * 1000L);
@@ -837,12 +857,12 @@ public final class MainActivity extends ComponentActivity
         box.setBackgroundColor(Color.rgb(12, 28, 36));
         int pad = Math.round(28 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad, pad, pad);
-        TextView title = new TextView(this);
-        title.setText(R.string.offline_title);
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
+        offlineTitle = new TextView(this);
+        offlineTitle.setText(R.string.offline_title);
+        offlineTitle.setTextColor(Color.WHITE);
+        offlineTitle.setTextSize(28);
+        offlineTitle.setGravity(Gravity.CENTER);
+        box.addView(offlineTitle);
         offlineDetail = new TextView(this);
         offlineDetail.setText(R.string.offline_body);
         offlineDetail.setTextColor(Color.rgb(186, 214, 214));
@@ -858,15 +878,116 @@ public final class MainActivity extends ComponentActivity
         offlinePage = box;
     }
 
-    /** 显示等待页，并写上正在重试的地址。 */
-    private void showOffline(String url) {
-        if (offlinePage == null) return;
-        offlineDetail.setText(getString(R.string.offline_body, url == null ? "" : url));
+    /** 显示等待页，并按没网、站点没开或证书错误写说明。 */
+    private void showOffline(String url, FailKind kind) {
+        if (offlinePage == null || offlineTitle == null) return;
+        failKind = kind;
+        int title = kind == FailKind.NETWORK ? R.string.offline_title_network
+                : kind == FailKind.SSL ? R.string.offline_title_ssl : R.string.offline_title_site;
+        int body = kind == FailKind.NETWORK ? R.string.offline_body_network
+                : kind == FailKind.SSL ? R.string.offline_body_ssl : R.string.offline_body_site;
+        offlineTitle.setText(title);
+        offlineDetail.setText(getString(body, url == null ? "" : url));
         offlinePage.setVisibility(View.VISIBLE);
         offlinePage.bringToFront();
         if (settings != null) settings.bringToFront();
         if (pinGate != null) pinGate.bringToFront();
         if (notice != null) notice.bringToFront();
+    }
+
+    /** 监听默认网络。断网时改等待页文案，网络恢复后立刻重试。 */
+    private void watchNetwork() {
+        if (networkCallback != null) return;
+        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+        if (cm == null) return;
+        networkWasDown = !NetUtil.hasNetwork(this);
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            /** 默认网络出现。只有等待页开着时才立刻重试。 */
+            @Override
+            public void onAvailable(Network network) {
+                handler.post(() -> {
+                    boolean recover = networkWasDown;
+                    networkWasDown = false;
+                    if (recover) retryAfterNetwork();
+                });
+            }
+
+            /** 默认网络消失时，把等待页改成没网。 */
+            @Override
+            public void onLost(Network network) {
+                handler.post(() -> {
+                    networkWasDown = true;
+                    if (offlinePage != null && offlinePage.getVisibility() == View.VISIBLE
+                            && failKind != FailKind.SSL) {
+                        showOffline(offlineUrl, FailKind.NETWORK);
+                    }
+                });
+            }
+        };
+        try {
+            cm.registerDefaultNetworkCallback(networkCallback);
+        } catch (RuntimeException e) {
+            Log.w(KioskApp.LOG, "Network callback was not registered", e);
+            networkCallback = null;
+        }
+    }
+
+    /** 离开前台时取消网络监听。 */
+    private void unwatchNetwork() {
+        if (networkCallback == null) return;
+        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+        if (cm != null) {
+            try {
+                cm.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException e) {
+                Log.w(KioskApp.LOG, "Network callback was not registered", e);
+            }
+        }
+        networkCallback = null;
+    }
+
+    /** 网络恢复后马上重开失败页，不等下一次定时重试。 */
+    private void retryAfterNetwork() {
+        if (offlinePage == null || offlinePage.getVisibility() != View.VISIBLE) return;
+        if (failKind == FailKind.SSL) return;
+        Log.i(KioskApp.LOG, "Network restored, retrying now");
+        cancelRetry();
+        retryLoad();
+    }
+
+    /** 对照 GitHub 最新正式版。自动检查大约 20 小时一次，失败只写日志。 */
+    private void checkForUpdate(boolean manual) {
+        long now = System.currentTimeMillis();
+        if (!manual && now - hub.store().updateCheckedAt() < 20L * 60 * 60 * 1000L) return;
+        if (!manual) hub.store().markUpdateChecked(now);
+        new Thread(() -> {
+            AppUpdate.Release release = AppUpdate.latest();
+            handler.post(() -> presentUpdate(release, manual));
+        }, "app-update").start();
+    }
+
+    /** 有更新时弹出下载提示。手动检查会说明已是最新或连不上。 */
+    private void presentUpdate(AppUpdate.Release release, boolean manual) {
+        if (isFinishing()) return;
+        if (release == null || release.version.isEmpty()) {
+            if (manual) Toast.makeText(this, R.string.update_unreachable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!AppUpdate.newer(BuildConfig.VERSION_NAME, release.version)) {
+            if (manual) Toast.makeText(this, R.string.update_current, Toast.LENGTH_LONG).show();
+            return;
+        }
+        String target = release.apkUrl.isEmpty() ? release.pageUrl : release.apkUrl;
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_title, release.version))
+                .setMessage(R.string.update_body)
+                .setPositiveButton(R.string.update_download, (dialog, which) -> {
+                    if (!target.isEmpty()) {
+                        openSystemScreen(new Intent(Intent.ACTION_VIEW, Uri.parse(target)));
+                    }
+                })
+                .setNegativeButton(R.string.update_later, null)
+                .show();
     }
 
     /** 主页面已经打开时收起等待页。 */
@@ -1210,6 +1331,12 @@ public final class MainActivity extends ComponentActivity
         openSystemScreen(new Intent(Settings.ACTION_SETTINGS));
     }
 
+    /** 设置里手动检查更新。 */
+    @Override
+    public void checkForUpdate() {
+        checkForUpdate(true);
+    }
+
     /** 设置面板关闭后恢复边缘手势和全屏。 */
     @Override
     public void onPanelClosed() {
@@ -1253,6 +1380,7 @@ public final class MainActivity extends ComponentActivity
     public void onSetupFinished() {
         if (!homeLoaded) loadFresh(config.homeUrl);
         firstRunPrompts();
+        checkForUpdate(false);
     }
 
     /** 首次运行：未授权时请求摄像头权限，随后提示一次电池优化白名单。 */

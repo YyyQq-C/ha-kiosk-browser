@@ -10,7 +10,7 @@
 
 HA 智能面板是面向 Android 平板的全屏网页应用，用于常驻显示 Home Assistant 页面。中文界面显示名为「HA 智能面板」，英文界面显示名为 HAPanel。
 
-最低系统为 Android 11（minSdk 30）。当前源码版本为 `versionName` 1.0.1、`versionCode` 37，以 `app/build.gradle` 为准。首次安装会先打开设置，确认 Home Assistant 地址后才加载页面。设置标题下写明如何从左边缘再次打开。日常开发在 `develop`。对外发布从 1.0.0 起算，`main` 上的当前发布版本是 1.0.1。
+最低系统为 Android 11（minSdk 30）。当前源码版本为 `versionName` 1.0.2、`versionCode` 38，以 `app/build.gradle` 为准。首次安装会先打开设置，确认 Home Assistant 地址后才加载页面。首页旁可以扫描局域网 8123，点结果填入地址。等待页会分开说明没网、地址没开和证书错误，网络恢复后马上重试。设置里可以对照 GitHub 最新正式包检查更新。设置标题下写明如何从左边缘再次打开。日常开发在 `develop`。对外发布从 1.0.0 起算，`main` 上的当前发布版本是 1.0.1。
 
 ## 适合谁
 

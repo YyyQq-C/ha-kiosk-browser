@@ -16,6 +16,16 @@ final class NetUtil {
     private NetUtil() {
     }
 
+    /** 当前是否有可用网络。不要求能上公网，局域网也能算连上。 */
+    static boolean hasNetwork(Context context) {
+        ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+        if (cm == null) return false;
+        Network network = cm.getActiveNetwork();
+        if (network == null) return false;
+        NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
     /** 返回当前网络的 IPv4 地址，用于在设置页提示局域网接口地址；取不到时返回空字符串。 */
     static String localIpv4(Context context) {
         ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
