@@ -10,7 +10,7 @@ Repository: [ha-kiosk-browser](https://github.com/YyyQq-C/ha-kiosk-browser)
 
 HAPanel is a full-screen Android web app that keeps a Home Assistant page on a tablet. The Chinese display name is HA 智能面板. The English display name is HAPanel.
 
-The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.35 and `versionCode` 36, as set in `app/build.gradle`. The first launch opens settings and does not load a page until the Home Assistant address is confirmed. The settings title is followed by how to open the panel again from the left edge. Day-to-day work is on `develop`. The released version on `main` remains 1.0.29.
+The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.35 and `versionCode` 36, as set in `app/build.gradle`. The first launch opens settings and does not load a page until the Home Assistant address is confirmed. The settings title is followed by how to open the panel again from the left edge. Day-to-day work is on `develop`. The released version on `main` is 1.0.35.
 
 ## Who it is for
 
