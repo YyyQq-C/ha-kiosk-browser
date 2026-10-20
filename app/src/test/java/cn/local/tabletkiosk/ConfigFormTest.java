@@ -19,6 +19,10 @@ public class ConfigFormTest {
         assertEquals(70, c.watchBrightness);
         assertEquals(20, c.standbyBrightness);
         assertEquals(60, c.dimDelaySeconds);
+        assertTrue(c.screensaverEnabled);
+        assertTrue(c.screensaverWeather);
+        assertTrue(c.screensaverLunar);
+        assertEquals(c.standbyBrightness, c.screensaverBrightness);
         assertEquals(50, c.motionSensitivity);
         assertTrue(c.motionEnabled);
         assertEquals(1883, c.mqttPort);
@@ -108,6 +112,32 @@ public class ConfigFormTest {
         KioskConfig kept = ConfigForm.preserveSettingsPin(result.config, saved.settingsPin);
         assertEquals("1234", kept.settingsPin);
         assertEquals(40, kept.volume);
+    }
+
+    /** 旧表单没有屏保亮度时，跟这次解析出的待机亮度，而不是固定 20。 */
+    @Test
+    public void missingScreensaverBrightnessFollowsStandby() {
+        Map<String, String> text = ConfigForm.toText(KioskConfig.defaults());
+        text.put(ConfigForm.STANDBY_BRIGHTNESS, "15");
+        text.remove(ConfigForm.SCREENSAVER_BRIGHTNESS);
+        ConfigForm.Result result = ConfigForm.parse(text, true, false, false, true, false, false, false, false,
+                false, false, true);
+        assertTrue(result.errors.toString(), result.ok());
+        assertEquals(15, result.config.standbyBrightness);
+        assertEquals(15, result.config.screensaverBrightness);
+        assertFalse(result.config.screensaverEnabled);
+        assertFalse(result.config.screensaverWeather);
+        assertTrue(result.config.screensaverLunar);
+    }
+
+    /** 屏保亮度超出 0 到 100 时拒绝。 */
+    @Test
+    public void screensaverBrightnessOutOfRange() {
+        Map<String, String> text = ConfigForm.toText(KioskConfig.defaults());
+        text.put(ConfigForm.SCREENSAVER_BRIGHTNESS, "101");
+        ConfigForm.Result result = ConfigForm.parse(text, true, false, false, true);
+        assertFalse(result.ok());
+        assertEquals("range:0:100", result.errors.get(ConfigForm.SCREENSAVER_BRIGHTNESS));
     }
 
     /** 显式提交的设置密码仍按 4 到 8 位数字校验。 */

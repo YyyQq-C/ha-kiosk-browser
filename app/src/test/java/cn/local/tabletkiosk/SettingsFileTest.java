@@ -1,6 +1,7 @@
 package cn.local.tabletkiosk;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -32,6 +33,47 @@ public class SettingsFileTest {
         assertEquals(40, document.config.watchBrightness);
         assertTrue(document.config.mqttEnabled);
         assertTrue(document.config.lanEnabled);
+        assertTrue(document.config.screensaverEnabled);
+        assertEquals(20, document.config.screensaverBrightness);
+    }
+
+    /** 旧文件没有屏保字段时默认打开，亮度回落到待机亮度。 */
+    @Test
+    public void oldFileWithoutScreensaverFieldsKeepsOverlayOn() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.standbyBrightness = 15;
+        builder.screensaverEnabled = false;
+        builder.screensaverWeather = false;
+        builder.screensaverLunar = false;
+        builder.screensaverBrightness = 80;
+        String json = SettingsFile.toJson(builder.build(), "zh", "");
+        json = json.replace("\"screensaverEnabled\":false,", "")
+                .replace("\"screensaverWeather\":false,", "")
+                .replace("\"screensaverLunar\":false,", "")
+                .replace("\"screensaver_brightness\":\"80\",", "");
+        SettingsFile.Document document = SettingsFile.fromJson(json);
+        assertNull(document.error);
+        assertTrue(document.config.screensaverEnabled);
+        assertTrue(document.config.screensaverWeather);
+        assertTrue(document.config.screensaverLunar);
+        assertEquals(15, document.config.standbyBrightness);
+        assertEquals(15, document.config.screensaverBrightness);
+    }
+
+    /** 关掉屏保和天气后，导出再读回仍是关掉。 */
+    @Test
+    public void roundTripKeepsScreensaverSwitchesOff() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.screensaverEnabled = false;
+        builder.screensaverWeather = false;
+        builder.screensaverLunar = true;
+        builder.screensaverBrightness = 8;
+        SettingsFile.Document document = SettingsFile.fromJson(SettingsFile.toJson(builder.build(), "zh", ""));
+        assertNull(document.error);
+        assertFalse(document.config.screensaverEnabled);
+        assertFalse(document.config.screensaverWeather);
+        assertTrue(document.config.screensaverLunar);
+        assertEquals(8, document.config.screensaverBrightness);
     }
 
     /** 不是本应用写出的文件时拒绝。 */

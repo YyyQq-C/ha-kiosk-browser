@@ -64,9 +64,9 @@ public final class KioskStatus {
         return new Builder().build();
     }
 
-    /** 亮屏：系统屏幕点亮并且处于观看亮度。 */
+    /** 亮屏：系统屏幕是否点亮。待机变暗和屏保仍算亮着，只有真正息屏才是否。 */
     public boolean screenOn() {
-        return interactive && watching;
+        return interactive;
     }
 
     /** 复制当前快照用于修改其中几项。 */
