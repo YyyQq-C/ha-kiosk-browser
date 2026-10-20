@@ -31,7 +31,7 @@ final class MqttBridge {
     private KioskConfig config;
     private MqttClient client;
     private volatile MqttTopics topics;
-    private int generation;
+    private volatile int generation;
     private ScheduledFuture<?> periodic;
     private ScheduledFuture<?> retry;
     private Boolean publishedOwner;
@@ -49,7 +49,8 @@ final class MqttBridge {
             config = next;
             if (reconnect) {
                 disconnect();
-                if (next.mqttEnabled) connect();
+                // 用户刚点了保存并同步时，由 syncNow 连接并回报结果，这里不连第二次
+                if (next.mqttEnabled && !hub.mqttSyncArmed()) connect();
             }
             schedulePeriodic();
         });
@@ -58,6 +59,28 @@ final class MqttBridge {
     /** 状态变化时立即上报。 */
     void publishState() {
         worker.execute(this::publishStateNow);
+    }
+
+    /** 按已保存配置立刻同步：已连接则上报，未连接则马上重连，不等定时重试。 */
+    void syncNow() {
+        worker.execute(() -> {
+            hub.clearMqttSyncArmed();
+            if (config == null || !config.mqttEnabled) {
+                hub.reportMqttLink(KioskHub.MqttLink.OFF, "", "");
+                return;
+            }
+            String endpoint = endpointLabel(config);
+            if (client != null && client.isConnected()) {
+                Log.i(KioskApp.LOG, "MQTT sync publishing current state");
+                publishStateNow();
+                hub.reportMqttLink(KioskHub.MqttLink.OK, endpoint, "");
+                return;
+            }
+            Log.i(KioskApp.LOG, "MQTT sync connecting now");
+            if (retry != null) retry.cancel(false);
+            retry = null;
+            connect();
+        });
     }
 
     /** 断开并停止工作线程，服务销毁时调用。 */
@@ -83,10 +106,30 @@ final class MqttBridge {
             Log.w(KioskApp.LOG, "MQTT connect failed to " + uri + ": reason=" + e.getReasonCode()
                     + " " + e.getMessage());
             closeClient();
+            hub.reportMqttLink(KioskHub.MqttLink.FAIL, endpointLabel(config), failureDetail(e));
             retry = worker.schedule(() -> {
                 if (gen == generation && config.mqttEnabled && client == null) connect();
             }, FIRST_CONNECT_RETRY_SECONDS, TimeUnit.SECONDS);
         }
+    }
+
+    /** 给界面看的主机和端口，不带账号和密码。 */
+    private static String endpointLabel(KioskConfig current) {
+        String host = current.mqttHost.contains(":") ? "[" + current.mqttHost + "]" : current.mqttHost;
+        return host + ":" + current.mqttPort;
+    }
+
+    /** 失败说明：保留原因码和短消息，去掉密码。 */
+    private String failureDetail(Throwable cause) {
+        if (cause == null) return "";
+        int code = cause instanceof MqttException ? ((MqttException) cause).getReasonCode() : -1;
+        String message = cause.getMessage() == null ? "" : cause.getMessage().replace('\n', ' ').trim();
+        String password = config == null ? "" : config.mqttPassword;
+        if (!password.isEmpty()) message = message.replace(password, "");
+        if (message.length() > 160) message = message.substring(0, 160);
+        if (code >= 0 && message.isEmpty()) return Integer.toString(code);
+        if (code >= 0) return message + " (" + code + ")";
+        return message;
     }
 
     /** 连接参数：自动重连、遗嘱消息和可选账号。 */
@@ -147,6 +190,7 @@ final class MqttBridge {
         publishDiscovery();
         publishStateNow();
         setConnected(true);
+        hub.reportMqttLink(KioskHub.MqttLink.OK, endpointLabel(config), "");
     }
 
     /** 发布全部实体的自动发现配置。 */
@@ -302,8 +346,11 @@ final class MqttBridge {
         /** 连接断开，Paho 会自动重连。 */
         @Override
         public void connectionLost(Throwable cause) {
+            if (gen != generation) return;
             Log.w(KioskApp.LOG, "MQTT connection lost: " + (cause == null ? "unknown" : cause.getMessage()));
             setConnected(false);
+            String endpoint = config == null ? "" : endpointLabel(config);
+            hub.reportMqttLink(KioskHub.MqttLink.FAIL, endpoint, failureDetail(cause));
         }
 
         /** 处理命令和 HA 上线通知。 */

@@ -12,6 +12,7 @@ public final class KioskConfigStore {
     private static final String BATTERY_PROMPTED = "battery_prompted";
     private static final String HA_TOKEN = "ha_token";
     private static final String SETUP_DONE = "setup_done";
+    private static final String UPDATE_CHECKED = "update_checked_at";
     private final SharedPreferences prefs;
 
     /** 绑定应用私有配置文件。 */
@@ -29,6 +30,13 @@ public final class KioskConfigStore {
         b.watchBrightness = prefs.getInt(ConfigForm.WATCH_BRIGHTNESS, d.watchBrightness);
         b.standbyBrightness = prefs.getInt(ConfigForm.STANDBY_BRIGHTNESS, d.standbyBrightness);
         b.dimDelaySeconds = prefs.getInt(ConfigForm.DIM_DELAY_SECONDS, d.dimDelaySeconds);
+        b.screensaverEnabled = prefs.getBoolean("screensaver_enabled", d.screensaverEnabled);
+        b.screensaverWeather = prefs.getBoolean("screensaver_weather", d.screensaverWeather);
+        b.screensaverLunar = prefs.getBoolean("screensaver_lunar", d.screensaverLunar);
+        // 旧配置没有屏保亮度时回落到已保存的待机亮度，而不是写死默认 20
+        b.screensaverBrightness = prefs.contains(ConfigForm.SCREENSAVER_BRIGHTNESS)
+                ? prefs.getInt(ConfigForm.SCREENSAVER_BRIGHTNESS, b.standbyBrightness)
+                : b.standbyBrightness;
         b.motionEnabled = prefs.getBoolean("motion_enabled", d.motionEnabled);
         b.motionSensitivity = prefs.getInt(ConfigForm.MOTION_SENSITIVITY, d.motionSensitivity);
         b.presenceHoldSeconds = prefs.getInt(ConfigForm.PRESENCE_HOLD_SECONDS, d.presenceHoldSeconds);
@@ -58,6 +66,8 @@ public final class KioskConfigStore {
         b.volume = prefs.getInt(ConfigForm.VOLUME, d.volume);
         b.settingsPin = prefs.getString(ConfigForm.SETTINGS_PIN, d.settingsPin);
         b.watchdogSeconds = prefs.getInt(ConfigForm.WATCHDOG_SECONDS, d.watchdogSeconds);
+        b.assistEnabled = prefs.getBoolean("assist_enabled", d.assistEnabled);
+        b.wakeSensitivity = prefs.getInt(ConfigForm.WAKE_SENSITIVITY, d.wakeSensitivity);
         return b.build();
     }
 
@@ -70,6 +80,10 @@ public final class KioskConfigStore {
                 .putInt(ConfigForm.WATCH_BRIGHTNESS, c.watchBrightness)
                 .putInt(ConfigForm.STANDBY_BRIGHTNESS, c.standbyBrightness)
                 .putInt(ConfigForm.DIM_DELAY_SECONDS, c.dimDelaySeconds)
+                .putBoolean("screensaver_enabled", c.screensaverEnabled)
+                .putBoolean("screensaver_weather", c.screensaverWeather)
+                .putBoolean("screensaver_lunar", c.screensaverLunar)
+                .putInt(ConfigForm.SCREENSAVER_BRIGHTNESS, c.screensaverBrightness)
                 .putBoolean("motion_enabled", c.motionEnabled)
                 .putInt(ConfigForm.MOTION_SENSITIVITY, c.motionSensitivity)
                 .putInt(ConfigForm.PRESENCE_HOLD_SECONDS, c.presenceHoldSeconds)
@@ -99,6 +113,8 @@ public final class KioskConfigStore {
                 .putInt(ConfigForm.VOLUME, c.volume)
                 .putString(ConfigForm.SETTINGS_PIN, c.settingsPin)
                 .putInt(ConfigForm.WATCHDOG_SECONDS, c.watchdogSeconds)
+                .putBoolean("assist_enabled", c.assistEnabled)
+                .putInt(ConfigForm.WAKE_SENSITIVITY, c.wakeSensitivity)
                 .commit();
         if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist kiosk config");
     }
@@ -152,5 +168,15 @@ public final class KioskConfigStore {
     /** 记录电池优化提示已弹出。 */
     public void markBatteryPrompted() {
         prefs.edit().putBoolean(BATTERY_PROMPTED, true).apply();
+    }
+
+    /** 上次自动检查更新的时间，没有检查过返回 0。 */
+    public long updateCheckedAt() {
+        return prefs.getLong(UPDATE_CHECKED, 0L);
+    }
+
+    /** 记下这次自动检查，避免每次打开都访问 GitHub。 */
+    public void markUpdateChecked(long now) {
+        prefs.edit().putLong(UPDATE_CHECKED, now).apply();
     }
 }

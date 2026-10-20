@@ -1,6 +1,7 @@
 package cn.local.tabletkiosk;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -12,11 +13,14 @@ import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.Uri;
 import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
@@ -71,6 +75,10 @@ import java.util.function.Consumer;
 public final class MainActivity extends ComponentActivity
         implements KioskHub.Controller, EdgeSwipeLayout.Listener, SettingsPanel.Host, CameraMotion.Listener {
     private static final long TICK_MS = 1000;
+    /** 窗口亮度刚改完的这段时间里，前置摄像头会看见自己造成的明暗变化，不能当成有人。 */
+    private static final long BRIGHTNESS_SETTLE_MS = 2500;
+    /** 屏保天气沿用 Home Assistant 已有状态，30 分钟才再读一次，避免反复请求。 */
+    private static final long WEATHER_TTL_MS = 30 * 60 * 1000L;
     private static final long WAKE_LOCK_MS = 5000;
     private static final long CACHE_PURGE_TIMEOUT_MS = 1500;
     private static final long NOTICE_MS = 8000;
@@ -120,6 +128,13 @@ public final class MainActivity extends ComponentActivity
                 if (granted) requestWifiPermission();
                 else maybePromptBattery();
             });
+    private final ActivityResultLauncher<String> micPermission =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+                Log.i(KioskApp.LOG, "Microphone permission granted=" + granted);
+                startKioskService();
+                AssistRuntime.start(this).apply();
+                refreshPanel();
+            });
     private final ActivityResultLauncher<String[]> wifiPermission =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), granted -> {
                 Log.i(KioskApp.LOG, "Wi-Fi permission result received");
@@ -146,7 +161,18 @@ public final class MainActivity extends ComponentActivity
     private WebView web;
     private TextView notice;
     private View offlinePage;
+    private TextView offlineTitle;
     private TextView offlineDetail;
+    private FailKind failKind = FailKind.SITE;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private boolean networkWasDown;
+
+    /** 等待页要区分的失败原因。 */
+    private enum FailKind {
+        NETWORK,
+        SITE,
+        SSL
+    }
     private TextToSpeech tts;
     private MediaPlayer player;
     private FrameLayout pinGate;
@@ -170,6 +196,18 @@ public final class MainActivity extends ComponentActivity
     private String pendingFreshUrl;
     /** 已经开始加载过首页。首次设置确认后避免再加载一次。 */
     private boolean homeLoaded;
+    private boolean assistHold;
+    private Button assistButton;
+    private TextView assistDetail;
+    private ScreenSaver screenSaver;
+    private String weatherLine = "";
+    private long weatherFetchedAt;
+    private boolean weatherFetching;
+    private int weatherGeneration;
+    /** 已经写到窗口上的亮度百分比。-1 表示还没写过。 */
+    private int appliedBrightnessPercent = -1;
+    /** 这次改亮度之后，在这个单调时钟之前忽略“屏幕仍亮着”时的摄像头回调。 */
+    private long brightnessSettleUntil;
 
     /** 按已保存的语言创建界面。 */
     @Override
@@ -198,6 +236,10 @@ public final class MainActivity extends ComponentActivity
         notice = buildNotice(root);
         buildOffline(root);
         pinGate = buildPinGate(root);
+        buildAssist(root);
+        screenSaver = new ScreenSaver(this, this::onScreenSaverDismiss);
+        root.addView(screenSaver, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
         if (hub.consumeReopenSettings()) {
             settings.post(() -> {
@@ -232,6 +274,7 @@ public final class MainActivity extends ComponentActivity
             purgeOnNextFinish = true;
             loadFresh(config.homeUrl);
             firstRunPrompts();
+            checkForUpdate(false);
         }
 
         hub.setController(this);
@@ -252,7 +295,31 @@ public final class MainActivity extends ComponentActivity
         ContextCompat.registerReceiver(this, screenReceiver, screen, ContextCompat.RECEIVER_NOT_EXPORTED);
 
         startKioskService();
-        DeviceOwnerPolicy.applyPolicies(this);
+        AssistRuntime.start(this).setListener(new AssistRuntime.Listener() {
+            @Override
+            public void onAssist(String state, String detail) {
+                showAssist(state, detail);
+            }
+
+            @Override
+            public void onAssistWake() {
+                wake();
+            }
+
+            @Override
+            public void onAssistPlayback(String url, Runnable finished) {
+                playAuthorized(url, finished);
+            }
+
+            @Override
+            public void onAssistHold(boolean hold) {
+                assistHold = hold;
+                if (hold) wake();
+                applyBrightness();
+                syncScreenSaver();
+            }
+        });
+        DeviceOwnerPolicy.applyPolicies(this, config.lockTaskEnabled);
         refreshOwnerStatus();
         applyBrightness();
         applyVolume();
@@ -267,6 +334,7 @@ public final class MainActivity extends ComponentActivity
         handler.post(tick);
         updateInteractive();
         syncCamera();
+        watchNetwork();
     }
 
     /** 每次回到前台重新隐藏系统栏并同步锁定模式。 */
@@ -283,12 +351,15 @@ public final class MainActivity extends ComponentActivity
     protected void onStop() {
         started = false;
         CookieManager.getInstance().flush();
+        unwatchNetwork();
         super.onStop();
     }
 
     /** 释放网页、摄像头和监听。 */
     @Override
     protected void onDestroy() {
+        AssistRuntime runtime = AssistRuntime.start(this);
+        runtime.setListener(null);
         hub.setController(null);
         hub.removeConfigListener(configListener);
         hub.removeStatusListener(statusListener);
@@ -447,7 +518,7 @@ public final class MainActivity extends ComponentActivity
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
                 onLoadFailure("Main frame load failed: code=" + error.getErrorCode() + " " + error.getDescription(),
-                        request.getUrl().toString());
+                        request.getUrl().toString(), FailKind.SITE);
             }
         }
 
@@ -455,7 +526,8 @@ public final class MainActivity extends ComponentActivity
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
             if (request.isForMainFrame() && response.getStatusCode() >= 500) {
-                onLoadFailure("Main frame HTTP error: " + response.getStatusCode(), request.getUrl().toString());
+                onLoadFailure("Main frame HTTP error: " + response.getStatusCode(), request.getUrl().toString(),
+                        FailKind.SITE);
             }
         }
 
@@ -464,7 +536,7 @@ public final class MainActivity extends ComponentActivity
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
             Log.e(KioskApp.LOG, "SSL error rejected: primary=" + error.getPrimaryError());
             handler.cancel();
-            onLoadFailure("SSL error rejected: primary=" + error.getPrimaryError(), error.getUrl());
+            onLoadFailure("SSL error rejected: primary=" + error.getPrimaryError(), error.getUrl(), FailKind.SSL);
         }
 
         /** 渲染进程崩溃或被回收时重建网页，避免整个应用退出。 */
@@ -480,14 +552,16 @@ public final class MainActivity extends ComponentActivity
         }
     }
 
-    /** 主页面失败时盖上本地等待页，并继续重试。设置里的重试秒数为 0 时按 30 秒。 */
-    private void onLoadFailure(String reason, String url) {
+    /** 主页面失败时盖上本地等待页，并继续重试。证书错误不自动重试。 */
+    private void onLoadFailure(String reason, String url, FailKind kind) {
         mainFrameError = true;
         stopPullRefresh();
         Log.w(KioskApp.LOG, reason);
         if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) offlineUrl = url;
-        showOffline(offlineUrl == null || offlineUrl.isEmpty() ? config.homeUrl : offlineUrl);
-        if (retryPending) return;
+        FailKind shown = kind == FailKind.SSL ? FailKind.SSL
+                : (NetUtil.hasNetwork(this) ? FailKind.SITE : FailKind.NETWORK);
+        showOffline(offlineUrl == null || offlineUrl.isEmpty() ? config.homeUrl : offlineUrl, shown);
+        if (retryPending || shown == FailKind.SSL) return;
         int seconds = config.retrySeconds > 0 ? config.retrySeconds : 30;
         retryPending = true;
         handler.postDelayed(retry, seconds * 1000L);
@@ -514,6 +588,9 @@ public final class MainActivity extends ComponentActivity
     private void onTick() {
         long now = SystemClock.elapsedRealtime();
         Calendar calendar = Calendar.getInstance();
+        // 设置和密码页不在边缘手势下面，触摸到不了 onUserTouch。人就在看面板，不能让观看计时在这里走完。
+        boolean panelOpen = settings != null && (settings.isOpen() || settings.isSetup());
+        if (panelOpen || !pinClosed()) presence.onActivity(now);
         presence.tick(now);
         applyBrightness();
         if (!settings.isOpen() && pinClosed() && dailyReload.due(config.dailyReloadEnabled, config.dailyReloadHour,
@@ -523,27 +600,42 @@ public final class MainActivity extends ComponentActivity
             reload();
         }
         applySleep(now, calendar.get(Calendar.HOUR_OF_DAY));
+        syncScreenSaver();
         checkWatchdog(now);
         if (++infoTick >= 60) {
             infoTick = 0;
             publishDeviceInfo();
         }
-        if (!settings.isOpen() && idle.shouldReload(now)) {
+        if (!assistHold && !settings.isOpen() && idle.shouldReload(now)) {
             Log.i(KioskApp.LOG, "Idle reload triggered after " + config.idleReloadHours + " h without touch");
             reload();
         }
     }
 
-    /** 按观看或待机状态设置本窗口亮度，不改系统全局亮度。 */
+    /** 按观看、待机或屏保设置本窗口亮度，不改系统全局亮度。屏保显示时只用屏保亮度。 */
     private void applyBrightness() {
-        boolean watching = presence.watching();
+        boolean watching = assistHold || presence.watching();
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        int percent = watching ? BrightnessSchedule.watchingBrightness(config, hour) : config.standbyBrightness;
+        int percent;
+        if (shouldShowScreenSaver()) {
+            // 覆盖层正在显示时，窗口亮度跟屏保百分比走
+            percent = config.screensaverBrightness;
+        } else if (watching) {
+            percent = BrightnessSchedule.watchingBrightness(config, hour);
+        } else {
+            percent = config.standbyBrightness;
+        }
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         float value = percent / 100f;
-        if (lp.screenBrightness != value) {
+        // 系统读回的浮点经常和写入值差一位。用绝对相等会每秒 setAttributes，亮度来回跳。
+        if (!sameWindowBrightness(lp.screenBrightness, value)) {
             lp.screenBrightness = value;
             getWindow().setAttributes(lp);
+        }
+        if (percent != appliedBrightnessPercent) {
+            appliedBrightnessPercent = percent;
+            // 只在档位真正变化时忽略随后的摄像头帧，避免自己把屏幕调暗又被当成有人调亮
+            brightnessSettleUntil = SystemClock.elapsedRealtime() + BRIGHTNESS_SETTLE_MS;
         }
         boolean someone = presence.presence();
         hub.updateStatus(b -> {
@@ -552,6 +644,12 @@ public final class MainActivity extends ComponentActivity
             b.presence = someone;
             return b;
         });
+    }
+
+    /** 窗口亮度是否已经是目标值。NaN 和未设置（-1）都算还没写上。允许约 2/255 的读回误差，避免 0% 被系统抬到最低亮度后又写回去。 */
+    private static boolean sameWindowBrightness(float current, float target) {
+        if (Float.isNaN(current) || current < 0f) return false;
+        return Math.abs(current - target) <= (2f / 255f);
     }
 
     /** 读取系统屏幕是否点亮，用于“亮屏”状态。 */
@@ -599,8 +697,10 @@ public final class MainActivity extends ComponentActivity
         }
         applyBrightness();
         applyVolume();
+        syncAssistButton();
         syncCamera();
         syncLockTask();
+        syncScreenSaver();
     }
 
     /** 按配置和权限打开或关闭摄像头检测。 */
@@ -619,6 +719,7 @@ public final class MainActivity extends ComponentActivity
     /** 按配置进入或退出锁定模式；打开系统界面期间暂不锁定。 */
     private void syncLockTask() {
         if (systemScreenOpen) return;
+        DeviceOwnerPolicy.applyPolicies(this, config.lockTaskEnabled);
         DeviceOwnerPolicy.syncLockTask(this, config.lockTaskEnabled);
         // 锁定模式切换是异步的，稍后再读取状态
         handler.postDelayed(this::refreshOwnerStatus, 500);
@@ -632,6 +733,56 @@ public final class MainActivity extends ComponentActivity
         long now = SystemClock.elapsedRealtime();
         idle.onInteraction(now);
         if (presence.onActivity(now)) applyBrightness();
+        syncScreenSaver();
+    }
+
+    /** 点屏保只恢复观看，不把这次点击交给网页。 */
+    private void onScreenSaverDismiss() {
+        onUserTouch();
+    }
+
+    /**
+     * 是否该盖上屏保。有人、设置、密码、语音期间不盖。
+     * 关掉「启用屏保」后也不盖，待机变暗和夜间息屏仍走原来的判断。
+     */
+    private boolean shouldShowScreenSaver() {
+        return started && config != null && config.screensaverEnabled && presence != null && !presence.watching()
+                && !assistHold && settings != null && !settings.isOpen() && !settings.isSetup() && pinClosed();
+    }
+
+    /** 无人且启用屏保时盖上覆盖层；有人、设置或语音期间收起。点按仍只关闭屏保。 */
+    private void syncScreenSaver() {
+        if (screenSaver == null || presence == null || config == null) return;
+        boolean show = shouldShowScreenSaver();
+        boolean drawLunar = show && config.screensaverLunar;
+        boolean drawWeather = show && config.screensaverWeather;
+        boolean wasShown = screenSaver.getVisibility() == View.VISIBLE;
+        String lunar = drawLunar ? LunarDate.format(LocalDateTime.now().toLocalDate()) : "";
+        screenSaver.setShown(show, LocalDateTime.now(), lunar, drawWeather ? weatherLine : "", drawLunar, drawWeather);
+        if (show != wasShown) Log.i(KioskApp.LOG, show ? "Screensaver shown" : "Screensaver hidden");
+        // 天气关掉时不请求 Home Assistant
+        if (drawWeather) refreshWeather();
+    }
+
+    /** 用已保存的首页和长期访问令牌读取 Home Assistant 天气。没有可显示文字时清空，屏保不画这一行。 */
+    private void refreshWeather() {
+        long now = SystemClock.elapsedRealtime();
+        if (weatherFetching || now - weatherFetchedAt < WEATHER_TTL_MS) return;
+        weatherFetching = true;
+        int generation = ++weatherGeneration;
+        String home = config.homeUrl;
+        String token = hub.store().haToken();
+        boolean chinese = AppLocales.ZH.equals(AppLocales.effective(this));
+        new Thread(() -> {
+            String line = HaWeather.display(HaWeather.fetch(home, token), chinese);
+            handler.post(() -> {
+                if (generation != weatherGeneration) return;
+                weatherFetching = false;
+                weatherFetchedAt = SystemClock.elapsedRealtime();
+                weatherLine = line == null ? "" : line;
+                if (screenSaver != null) screenSaver.setWeather(weatherLine);
+            });
+        }, "kiosk-weather").start();
     }
 
     /** 左边缘滑出设置；设了密码时先核对密码。 */
@@ -646,13 +797,18 @@ public final class MainActivity extends ComponentActivity
         syncPullRefresh();
     }
 
-    /** 摄像头检测到画面变化：标记有人；屏幕已熄时点亮。 */
+    /** 摄像头检测到画面变化：标记有人；屏幕已熄时点亮。刚改完亮度的帧不当成有人。 */
     @Override
     public void onMotion() {
         boolean dark = power != null && !power.isInteractive();
+        if (!dark && SystemClock.elapsedRealtime() < brightnessSettleUntil) {
+            Log.i(KioskApp.LOG, "Ignoring camera motion while brightness is settling");
+            return;
+        }
         presence.onMotion(SystemClock.elapsedRealtime());
         if (dark) wake();
         else applyBrightness();
+        syncScreenSaver();
     }
 
     /** 清掉网页缓存和 Service Worker 后重新取当前页，保留 Cookie 和 localStorage。 */
@@ -837,12 +993,12 @@ public final class MainActivity extends ComponentActivity
         box.setBackgroundColor(Color.rgb(12, 28, 36));
         int pad = Math.round(28 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad, pad, pad);
-        TextView title = new TextView(this);
-        title.setText(R.string.offline_title);
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
+        offlineTitle = new TextView(this);
+        offlineTitle.setText(R.string.offline_title);
+        offlineTitle.setTextColor(Color.WHITE);
+        offlineTitle.setTextSize(28);
+        offlineTitle.setGravity(Gravity.CENTER);
+        box.addView(offlineTitle);
         offlineDetail = new TextView(this);
         offlineDetail.setText(R.string.offline_body);
         offlineDetail.setTextColor(Color.rgb(186, 214, 214));
@@ -858,15 +1014,116 @@ public final class MainActivity extends ComponentActivity
         offlinePage = box;
     }
 
-    /** 显示等待页，并写上正在重试的地址。 */
-    private void showOffline(String url) {
-        if (offlinePage == null) return;
-        offlineDetail.setText(getString(R.string.offline_body, url == null ? "" : url));
+    /** 显示等待页，并按没网、站点没开或证书错误写说明。 */
+    private void showOffline(String url, FailKind kind) {
+        if (offlinePage == null || offlineTitle == null) return;
+        failKind = kind;
+        int title = kind == FailKind.NETWORK ? R.string.offline_title_network
+                : kind == FailKind.SSL ? R.string.offline_title_ssl : R.string.offline_title_site;
+        int body = kind == FailKind.NETWORK ? R.string.offline_body_network
+                : kind == FailKind.SSL ? R.string.offline_body_ssl : R.string.offline_body_site;
+        offlineTitle.setText(title);
+        offlineDetail.setText(getString(body, url == null ? "" : url));
         offlinePage.setVisibility(View.VISIBLE);
         offlinePage.bringToFront();
         if (settings != null) settings.bringToFront();
         if (pinGate != null) pinGate.bringToFront();
         if (notice != null) notice.bringToFront();
+    }
+
+    /** 监听默认网络。断网时改等待页文案，网络恢复后立刻重试。 */
+    private void watchNetwork() {
+        if (networkCallback != null) return;
+        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+        if (cm == null) return;
+        networkWasDown = !NetUtil.hasNetwork(this);
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            /** 默认网络出现。只有等待页开着时才立刻重试。 */
+            @Override
+            public void onAvailable(Network network) {
+                handler.post(() -> {
+                    boolean recover = networkWasDown;
+                    networkWasDown = false;
+                    if (recover) retryAfterNetwork();
+                });
+            }
+
+            /** 默认网络消失时，把等待页改成没网。 */
+            @Override
+            public void onLost(Network network) {
+                handler.post(() -> {
+                    networkWasDown = true;
+                    if (offlinePage != null && offlinePage.getVisibility() == View.VISIBLE
+                            && failKind != FailKind.SSL) {
+                        showOffline(offlineUrl, FailKind.NETWORK);
+                    }
+                });
+            }
+        };
+        try {
+            cm.registerDefaultNetworkCallback(networkCallback);
+        } catch (RuntimeException e) {
+            Log.w(KioskApp.LOG, "Network callback was not registered", e);
+            networkCallback = null;
+        }
+    }
+
+    /** 离开前台时取消网络监听。 */
+    private void unwatchNetwork() {
+        if (networkCallback == null) return;
+        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+        if (cm != null) {
+            try {
+                cm.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException e) {
+                Log.w(KioskApp.LOG, "Network callback was not registered", e);
+            }
+        }
+        networkCallback = null;
+    }
+
+    /** 网络恢复后马上重开失败页，不等下一次定时重试。 */
+    private void retryAfterNetwork() {
+        if (offlinePage == null || offlinePage.getVisibility() != View.VISIBLE) return;
+        if (failKind == FailKind.SSL) return;
+        Log.i(KioskApp.LOG, "Network restored, retrying now");
+        cancelRetry();
+        retryLoad();
+    }
+
+    /** 对照 GitHub 最新正式版。自动检查大约 20 小时一次，失败只写日志。 */
+    private void checkForUpdate(boolean manual) {
+        long now = System.currentTimeMillis();
+        if (!manual && now - hub.store().updateCheckedAt() < 20L * 60 * 60 * 1000L) return;
+        if (!manual) hub.store().markUpdateChecked(now);
+        new Thread(() -> {
+            AppUpdate.Release release = AppUpdate.latest();
+            handler.post(() -> presentUpdate(release, manual));
+        }, "app-update").start();
+    }
+
+    /** 有更新时弹出下载提示。手动检查会说明已是最新或连不上。 */
+    private void presentUpdate(AppUpdate.Release release, boolean manual) {
+        if (isFinishing()) return;
+        if (release == null || release.version.isEmpty()) {
+            if (manual) Toast.makeText(this, R.string.update_unreachable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!AppUpdate.newer(BuildConfig.VERSION_NAME, release.version)) {
+            if (manual) Toast.makeText(this, R.string.update_current, Toast.LENGTH_LONG).show();
+            return;
+        }
+        String target = release.apkUrl.isEmpty() ? release.pageUrl : release.apkUrl;
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_title, release.version))
+                .setMessage(R.string.update_body)
+                .setPositiveButton(R.string.update_download, (dialog, which) -> {
+                    if (!target.isEmpty()) {
+                        openSystemScreen(new Intent(Intent.ACTION_VIEW, Uri.parse(target)));
+                    }
+                })
+                .setNegativeButton(R.string.update_later, null)
+                .show();
     }
 
     /** 主页面已经打开时收起等待页。 */
@@ -921,7 +1178,7 @@ public final class MainActivity extends ComponentActivity
         if (!config.sleepEnabled) return;
         boolean asleep = SleepWindow.contains(config.sleepStartHour, config.sleepEndHour, hour);
         boolean interactive = power != null && power.isInteractive();
-        if (asleep && interactive && presence.quiet(now) && settings != null && !settings.isOpen() && pinClosed()
+        if (asleep && interactive && !assistHold && presence.quiet(now) && settings != null && !settings.isOpen() && pinClosed()
                 && hub.status().deviceOwner) {
             Log.i(KioskApp.LOG, "Sleep schedule turning the screen off");
             screenOff();
@@ -970,6 +1227,102 @@ public final class MainActivity extends ComponentActivity
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         if (max <= 0) return 0;
         return Math.round(audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100f / max);
+    }
+
+    /** 右下角麦克风。打开语音助手后才出现，避开左边缘和顶部下拉。 */
+    private void buildAssist(FrameLayout root) {
+        assistDetail = new TextView(this);
+        assistDetail.setTextColor(Color.WHITE);
+        assistDetail.setTextSize(14);
+        assistDetail.setMaxLines(2);
+        assistDetail.setVisibility(View.GONE);
+        FrameLayout.LayoutParams detailLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        detailLp.gravity = Gravity.END | Gravity.BOTTOM;
+        detailLp.setMarginEnd(dp(24));
+        detailLp.bottomMargin = dp(88);
+        root.addView(assistDetail, detailLp);
+        assistButton = new Button(this);
+        assistButton.setText(R.string.assist_idle);
+        assistButton.setOnClickListener(v -> AssistRuntime.start(this).tap());
+        FrameLayout.LayoutParams buttonLp = new FrameLayout.LayoutParams(dp(72), dp(72));
+        buttonLp.gravity = Gravity.END | Gravity.BOTTOM;
+        buttonLp.setMarginEnd(dp(20));
+        buttonLp.bottomMargin = dp(20);
+        root.addView(assistButton, buttonLp);
+        syncAssistButton();
+    }
+
+    /** 按开关显示麦克风，并刷新当前状态文字。 */
+    private void syncAssistButton() {
+        if (assistButton == null) return;
+        boolean enabled = config != null && config.assistEnabled;
+        assistButton.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (!enabled && assistDetail != null) assistDetail.setVisibility(View.GONE);
+    }
+
+    /** 显示听写或回答，并切换按钮文案。 */
+    private void showAssist(String state, String detail) {
+        if (assistButton == null) return;
+        int label = R.string.assist_idle;
+        if (AssistRuntime.LISTENING.equals(state)) label = R.string.assist_listening;
+        else if (AssistRuntime.THINKING.equals(state)) label = R.string.assist_thinking;
+        else if (AssistRuntime.SPEAKING.equals(state)) label = R.string.assist_speaking;
+        assistButton.setText(label);
+        if (assistDetail == null) return;
+        if (detail == null || detail.isEmpty() || "token".equals(detail)) {
+            assistDetail.setVisibility(View.GONE);
+            if ("token".equals(detail)) {
+                Toast.makeText(this, R.string.assist_need_token, Toast.LENGTH_SHORT).show();
+            } else if ("unauthorized".equals(detail) || "unreachable".equals(detail)) {
+                Toast.makeText(this, "unauthorized".equals(detail)
+                        ? R.string.assist_unauthorized : R.string.assist_unreachable, Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        assistDetail.setText(detail);
+        assistDetail.setVisibility(View.VISIBLE);
+    }
+
+    /** 播放带访问令牌的回答音频。播完执行 finished。 */
+    private void playAuthorized(String url, Runnable finished) {
+        if (url == null || url.isEmpty()) {
+            if (finished != null) finished.run();
+            return;
+        }
+        Log.i(KioskApp.LOG, "Playing assist audio");
+        releasePlayer();
+        MediaPlayer next = new MediaPlayer();
+        player = next;
+        next.setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build());
+        next.setOnCompletionListener(mp -> {
+            if (player == mp) player = null;
+            mp.release();
+            if (finished != null) finished.run();
+        });
+        next.setOnErrorListener((mp, what, extra) -> {
+            Log.w(KioskApp.LOG, "Assist audio failed, what=" + what + " extra=" + extra);
+            if (player == mp) player = null;
+            mp.release();
+            if (finished != null) finished.run();
+            return true;
+        });
+        try {
+            Map<String, String> headers = new HashMap<>();
+            String token = hub.store().haToken();
+            if (!token.isEmpty()) headers.put("Authorization", "Bearer " + token);
+            next.setDataSource(this, Uri.parse(url), headers);
+            next.prepareAsync();
+            next.setOnPreparedListener(MediaPlayer::start);
+        } catch (Exception e) {
+            Log.w(KioskApp.LOG, "Assist audio source rejected", e);
+            if (player == next) player = null;
+            next.release();
+            if (finished != null) finished.run();
+        }
     }
 
     /** 播放远程音频，新的播放会停掉上一段。 */
@@ -1186,6 +1539,18 @@ public final class MainActivity extends ComponentActivity
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
+    /** 请求麦克风权限。 */
+    @Override
+    public void requestMicPermission() {
+        micPermission.launch(Manifest.permission.RECORD_AUDIO);
+    }
+
+    /** 是否已经允许使用麦克风。 */
+    @Override
+    public boolean micGranted() {
+        return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
     /** 请求摄像头权限。 */
     @Override
     public void requestCameraPermission() {
@@ -1210,6 +1575,28 @@ public final class MainActivity extends ComponentActivity
         openSystemScreen(new Intent(Settings.ACTION_SETTINGS));
     }
 
+    /** 关闭锁定和固定桌面，尝试取消设备所有者，并打开其他桌面。 */
+    @Override
+    public void releaseKiosk() {
+        KioskConfig.Builder builder = hub.config().toBuilder();
+        builder.lockTaskEnabled = false;
+        KioskConfig next = builder.build();
+        if (!next.equals(hub.config())) hub.updateConfig(next);
+        else syncLockTask();
+        boolean cleared = DeviceOwnerPolicy.clearDeviceOwner(this);
+        if (settings != null && settings.isOpen()) settings.hide();
+        boolean opened = DeviceOwnerPolicy.openOtherHome(this);
+        int message = cleared ? R.string.release_owner_cleared
+                : opened ? R.string.release_owner_kept : R.string.release_no_launcher;
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    /** 设置里手动检查更新。 */
+    @Override
+    public void checkForUpdate() {
+        checkForUpdate(true);
+    }
+
     /** 设置面板关闭后恢复边缘手势和全屏。 */
     @Override
     public void onPanelClosed() {
@@ -1217,6 +1604,9 @@ public final class MainActivity extends ComponentActivity
         syncPullRefresh();
         hideSystemBars();
         syncCamera();
+        // 设置里改过屏保开关或亮度后，关上面板马上按新配置盖屏或恢复亮度
+        applyBrightness();
+        syncScreenSaver();
     }
 
     /** 是否已有摄像头权限。 */
@@ -1253,6 +1643,7 @@ public final class MainActivity extends ComponentActivity
     public void onSetupFinished() {
         if (!homeLoaded) loadFresh(config.homeUrl);
         firstRunPrompts();
+        checkForUpdate(false);
     }
 
     /** 首次运行：未授权时请求摄像头权限，随后提示一次电池优化白名单。 */

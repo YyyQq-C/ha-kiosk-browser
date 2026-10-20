@@ -1,0 +1,9 @@
+melspectrogram.onnx and embedding_model.onnx
+Source: https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/
+License: Apache License 2.0
+
+okay_nabu.onnx
+Source: https://github.com/jxlarrea/voice-satellite-card-integration/raw/76d31d5404a57d185d36b881dfcef4297f5ee438/custom_components/voice_satellite/models/openwakeword/ok_nabu.onnx
+The official openWakeWord v0.5.1 release does not publish an okay nabu model.
+This file is the openWakeWord-format classifier from that commit.
+Repository license: MIT License, Copyright (c) 2026 Xavier Larrea

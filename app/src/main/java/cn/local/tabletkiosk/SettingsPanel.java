@@ -11,6 +11,7 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.ColorDrawable;
@@ -22,6 +23,7 @@ import android.text.InputType;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.UnderlineSpan;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -31,6 +33,7 @@ import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -44,9 +47,12 @@ import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /** 从左侧滑入的设置面板：改完一项就保存，点外侧或向左滑关闭。 */
 final class SettingsPanel extends FrameLayout {
@@ -64,6 +70,9 @@ final class SettingsPanel extends FrameLayout {
 
         void openSystemSettings();
 
+        /** 退出锁定模式并打开其他应用。 */
+        void releaseKiosk();
+
         void onPanelClosed();
 
         boolean cameraGranted();
@@ -76,6 +85,12 @@ final class SettingsPanel extends FrameLayout {
 
         boolean wifiGranted();
 
+        /** 请求麦克风，供常驻唤醒和点按说话使用。 */
+        void requestMicPermission();
+
+        /** 是否已经允许使用麦克风。 */
+        boolean micGranted();
+
         /** 记下语言。设置面板自行更换文案，不重建 Activity。 */
         void onLanguageChanged(String language);
 
@@ -87,6 +102,9 @@ final class SettingsPanel extends FrameLayout {
 
         /** 首次设置已确认，可以加载首页。 */
         void onSetupFinished();
+
+        /** 手动检查 GitHub 上有没有新的正式包。 */
+        void checkForUpdate();
     }
 
     private static final int TEXT = Color.rgb(22, 40, 44);
@@ -95,13 +113,25 @@ final class SettingsPanel extends FrameLayout {
     private static final int ACCENT = Color.rgb(32, 92, 96);
     private static final int FIELD = Color.rgb(244, 247, 246);
     private static final int LINE = Color.rgb(214, 224, 222);
+    private static final int OK_COLOR = Color.rgb(30, 122, 92);
+    private static final int FAIL_COLOR = Color.rgb(176, 72, 64);
+    /** MQTT 卡片上的输入项。这些值只在点「保存并同步」时写入。 */
+    private static final String[] MQTT_KEYS = {
+            ConfigForm.MQTT_HOST,
+            ConfigForm.MQTT_PORT,
+            ConfigForm.MQTT_USERNAME,
+            ConfigForm.MQTT_PASSWORD,
+            ConfigForm.MQTT_BASE_TOPIC,
+            ConfigForm.MQTT_DISCOVERY_PREFIX,
+            ConfigForm.MQTT_STATE_INTERVAL
+    };
 
     private final KioskHub hub;
     private final Host host;
     private final float density;
     private final View scrim;
     private final PanelFrame panel;
-    private final ScrollView scroll;
+    private final StableScroll scroll;
     private final LinearLayout form;
     private final Map<String, EditText> fields = new HashMap<>();
     /** 百分比拖动条。保存时写回文本，避免这些项从输入框地图消失后被当成缺省。 */
@@ -112,12 +142,23 @@ final class SettingsPanel extends FrameLayout {
     private Switch scheduleSwitch;
     private Switch dailySwitch;
     private Switch sleepSwitch;
+    private Switch screensaverSwitch;
+    private Switch screensaverWeatherSwitch;
+    private Switch screensaverLunarSwitch;
     private Switch mqttSwitch;
+    private TextView mqttResult;
+    /** 正在等这一次保存的连接结果，完成后才弹出成功或失败。 */
+    private boolean awaitingMqtt;
+    private final Consumer<KioskHub.MqttLink> mqttLinkListener = this::onMqttLink;
     private Switch lanSwitch;
     private Switch lockSwitch;
+    private Switch assistSwitch;
+    private Button micButton;
     private LinearLayout statusGrid;
     private LinearLayout statRow;
     private int statCount;
+    /** 状态数字，刷新时只改文字，避免拆掉视图后滚动跳回顶部。 */
+    private final List<TextView> statValues = new ArrayList<>();
     private TextView lanHint;
     private TextView ownerText;
     private Button cameraButton;
@@ -170,7 +211,7 @@ final class SettingsPanel extends FrameLayout {
         panelBg.setCornerRadii(new float[] {0, 0, radius, radius, radius, radius, 0, 0});
         panel.setBackground(panelBg);
         panel.setElevation(dp(16));
-        scroll = new ScrollView(context);
+        scroll = new StableScroll(context);
         scroll.setFillViewport(true);
         scroll.setFocusable(true);
         scroll.setFocusableInTouchMode(true);
@@ -185,6 +226,7 @@ final class SettingsPanel extends FrameLayout {
         addView(panel, new LayoutParams(dp(600), LayoutParams.MATCH_PARENT, Gravity.START));
 
         buildForm(context);
+        hub.addMqttLinkListener(mqttLinkListener);
         setVisibility(GONE);
     }
 
@@ -243,15 +285,15 @@ final class SettingsPanel extends FrameLayout {
     private void finishSetup() {
         commit();
         EditText home = fields.get(ConfigForm.HOME_URL);
-        if (home != null && home.getError() != null) {
-            home.requestFocus();
+            if (home != null && home.getError() != null) {
+            scroll.focusField(home);
             return;
         }
         String url = home == null || home.getText() == null ? "" : home.getText().toString().trim();
         if (!(url.startsWith("http://") || url.startsWith("https://")) || url.length() < 10 || url.contains(" ")) {
             if (home != null) {
                 home.setError(ui.getString(R.string.error_url));
-                home.requestFocus();
+                scroll.focusField(home);
             }
             return;
         }
@@ -301,12 +343,15 @@ final class SettingsPanel extends FrameLayout {
     protected void onDetachedFromWindow() {
         dismissHelp();
         if (hourDialog != null) hourDialog.dismiss();
+        hub.removeMqttLinkListener(mqttLinkListener);
         super.onDetachedFromWindow();
     }
 
     /** 刷新面板顶部状态、设备所有者说明和权限按钮。 */
     void refreshStatus() {
         if (statusGrid == null) return;
+        // 改文字和按钮显隐会触发布局。先钉住位置，被夹走时再写回。
+        scroll.keepPosition();
         KioskStatus s = hub.status();
         KioskConfig c = hub.config();
         String battery = s.battery >= 0
@@ -315,21 +360,39 @@ final class SettingsPanel extends FrameLayout {
         String mqtt = !c.mqttEnabled ? ui.getString(R.string.mqtt_off)
                 : s.mqttConnected ? ui.getString(R.string.mqtt_connected)
                 : ui.getString(R.string.mqtt_disconnected);
-        statusGrid.removeAllViews();
-        statRow = null;
-        statCount = 0;
-        addStat(ui.getString(R.string.entity_screen_on), yes(s.screenOn()));
-        addStat(ui.getString(R.string.entity_presence), yes(s.presence));
-        addStat(ui.getString(R.string.entity_brightness), s.brightness + "%");
-        addStat(ui.getString(R.string.entity_battery), battery);
-        addStat(ui.getString(R.string.section_mqtt), mqtt);
-        addStat(ui.getString(R.string.entity_lock),
-                s.lockTask ? ui.getString(R.string.lock_on) : ui.getString(R.string.lock_off));
-        addStat(ui.getString(R.string.entity_cpu), percentText(s.cpuPercent));
-        addStat(ui.getString(R.string.entity_memory), memoryText(s));
-        addStat(ui.getString(R.string.entity_storage), percentText(s.storagePercent));
-        addStat(ui.getString(R.string.entity_temperature), temperatureText(s.batteryTempTenths));
-        addStat(ui.getString(R.string.entity_app_memory), megabyteText(s.appMemoryMb));
+        String[] stats = {
+                yes(s.screenOn()),
+                yes(s.presence),
+                s.brightness + "%",
+                battery,
+                mqtt,
+                s.lockTask ? ui.getString(R.string.lock_on) : ui.getString(R.string.lock_off),
+                percentText(s.cpuPercent),
+                memoryText(s),
+                percentText(s.storagePercent),
+                temperatureText(s.batteryTempTenths),
+                megabyteText(s.appMemoryMb)
+        };
+        // 格数不变时只改数字。拆掉再加会让滚动范围瞬间变短，位置被夹回顶部。
+        if (statValues.size() == stats.length) {
+            for (int i = 0; i < stats.length; i++) statValues.get(i).setText(stats[i]);
+        } else {
+            statusGrid.removeAllViews();
+            statRow = null;
+            statCount = 0;
+            statValues.clear();
+            addStat(ui.getString(R.string.entity_screen_on), stats[0]);
+            addStat(ui.getString(R.string.entity_presence), stats[1]);
+            addStat(ui.getString(R.string.entity_brightness), stats[2]);
+            addStat(ui.getString(R.string.entity_battery), stats[3]);
+            addStat(ui.getString(R.string.section_mqtt), stats[4]);
+            addStat(ui.getString(R.string.entity_lock), stats[5]);
+            addStat(ui.getString(R.string.entity_cpu), stats[6]);
+            addStat(ui.getString(R.string.entity_memory), stats[7]);
+            addStat(ui.getString(R.string.entity_storage), stats[8]);
+            addStat(ui.getString(R.string.entity_temperature), stats[9]);
+            addStat(ui.getString(R.string.entity_app_memory), stats[10]);
+        }
 
         String ip = NetUtil.localIpv4(getContext());
         String address = "http://" + (ip.isEmpty() ? ui.getString(R.string.tablet_ip) : ip) + ":" + c.lanPort;
@@ -344,6 +407,10 @@ final class SettingsPanel extends FrameLayout {
         batteryButton.setVisibility(host.batteryExempt() ? GONE : VISIBLE);
         overlayButton.setVisibility(s.deviceOwner || host.overlayGranted() ? GONE : VISIBLE);
         wifiButton.setVisibility(host.wifiGranted() ? GONE : VISIBLE);
+        if (micButton != null) {
+            micButton.setVisibility(hub.config().assistEnabled && !host.micGranted() ? VISIBLE : GONE);
+        }
+        paintMqttLink(hub.mqttLink());
     }
 
     /** 按顺序创建全部设置项。 */
@@ -364,6 +431,9 @@ final class SettingsPanel extends FrameLayout {
 
         statusGrid = new LinearLayout(context);
         statusGrid.setOrientation(LinearLayout.VERTICAL);
+        statValues.clear();
+        statRow = null;
+        statCount = 0;
         card(context).addView(statusGrid);
 
         section(context, context.getString(R.string.section_page), R.string.help_page);
@@ -376,6 +446,7 @@ final class SettingsPanel extends FrameLayout {
         startButton = button(context, context.getString(R.string.setup_start), this::finishSetup, true);
         startButton.setVisibility(GONE);
         currentCard.addView(startButton, fullWidth());
+        currentCard.addView(button(context, context.getString(R.string.find_ha), this::findHa, false), fullWidth());
         pair(context,
                 ConfigForm.IDLE_RELOAD_HOURS, context.getString(R.string.idle_reload), InputType.TYPE_CLASS_NUMBER,
                 ConfigForm.RETRY_SECONDS, context.getString(R.string.retry_seconds), InputType.TYPE_CLASS_NUMBER);
@@ -399,6 +470,11 @@ final class SettingsPanel extends FrameLayout {
                 percentColumn(context, ConfigForm.WATCH_BRIGHTNESS, context.getString(R.string.watch_brightness), 1, 100),
                 percentColumn(context, ConfigForm.STANDBY_BRIGHTNESS, context.getString(R.string.standby_brightness), 0, 100));
         field(context, ConfigForm.DIM_DELAY_SECONDS, context.getString(R.string.dim_delay), InputType.TYPE_CLASS_NUMBER);
+        // 屏保开关、天气、农历和屏保亮度紧挨待机亮度与变暗延迟；关掉屏保后这些项仍可改并保存
+        screensaverSwitch = toggle(context, context.getString(R.string.screensaver_switch));
+        screensaverWeatherSwitch = toggle(context, context.getString(R.string.screensaver_weather));
+        screensaverLunarSwitch = toggle(context, context.getString(R.string.screensaver_lunar));
+        percent(context, ConfigForm.SCREENSAVER_BRIGHTNESS, context.getString(R.string.screensaver_brightness), 0, 100);
         scheduleSwitch = toggle(context, context.getString(R.string.schedule_switch));
         placePair(context,
                 hourColumn(context, ConfigForm.DAY_START_HOUR, context.getString(R.string.day_start)),
@@ -424,19 +500,35 @@ final class SettingsPanel extends FrameLayout {
         // 媒体音量 0–100
         percent(context, ConfigForm.VOLUME, context.getString(R.string.volume), 0, 100);
 
+        section(context, context.getString(R.string.section_assist), R.string.help_assist);
+        assistSwitch = toggle(context, context.getString(R.string.assist_switch));
+        percent(context, ConfigForm.WAKE_SENSITIVITY, context.getString(R.string.wake_sensitivity), 0, 100);
+        TextView assistHint = text(context, context.getString(R.string.assist_hint), 13, MUTED, false);
+        assistHint.setPadding(dp(2), dp(4), dp(2), dp(8));
+        currentCard.addView(assistHint, fullWidth());
+        micButton = button(context, context.getString(R.string.grant_mic), host::requestMicPermission, false);
+        currentCard.addView(micButton, fullWidth());
+
         section(context, context.getString(R.string.section_mqtt), R.string.help_mqtt);
-        mqttSwitch = toggle(context, context.getString(R.string.mqtt_switch));
+        // MQTT 不随开关或失焦写入，只有点保存才连接并上报
+        mqttSwitch = toggle(context, context.getString(R.string.mqtt_switch), false);
         field(context, ConfigForm.MQTT_HOST, context.getString(R.string.mqtt_host),
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI, false);
         pair(context,
                 ConfigForm.MQTT_PORT, context.getString(R.string.mqtt_port), InputType.TYPE_CLASS_NUMBER,
-                ConfigForm.MQTT_USERNAME, context.getString(R.string.mqtt_username), InputType.TYPE_CLASS_TEXT);
+                ConfigForm.MQTT_USERNAME, context.getString(R.string.mqtt_username), InputType.TYPE_CLASS_TEXT, false);
         field(context, ConfigForm.MQTT_PASSWORD, context.getString(R.string.mqtt_password),
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        field(context, ConfigForm.MQTT_BASE_TOPIC, context.getString(R.string.base_topic), InputType.TYPE_CLASS_TEXT);
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, false);
+        field(context, ConfigForm.MQTT_BASE_TOPIC, context.getString(R.string.base_topic), InputType.TYPE_CLASS_TEXT, false);
         pair(context,
                 ConfigForm.MQTT_DISCOVERY_PREFIX, context.getString(R.string.discovery_prefix), InputType.TYPE_CLASS_TEXT,
-                ConfigForm.MQTT_STATE_INTERVAL, context.getString(R.string.state_interval), InputType.TYPE_CLASS_NUMBER);
+                ConfigForm.MQTT_STATE_INTERVAL, context.getString(R.string.state_interval), InputType.TYPE_CLASS_NUMBER, false);
+        currentCard.addView(button(context, context.getString(R.string.mqtt_save), this::saveMqtt, true), fullWidth());
+        mqttResult = text(context, "", 13, MUTED, false);
+        mqttResult.setLineSpacing(dp(3), 1f);
+        mqttResult.setTextIsSelectable(true);
+        mqttResult.setVisibility(GONE);
+        currentCard.addView(mqttResult, fullWidth());
 
         section(context, context.getString(R.string.section_lan), R.string.help_lan);
         lanSwitch = toggle(context, context.getString(R.string.lan_switch));
@@ -455,6 +547,8 @@ final class SettingsPanel extends FrameLayout {
         ownerText.setTextIsSelectable(true);
         currentCard.addView(ownerText, fullWidth());
         lockSwitch = toggle(context, context.getString(R.string.lock_switch));
+        currentCard.addView(button(context, context.getString(R.string.release_kiosk), this::releaseKiosk, true),
+                fullWidth());
 
         section(context, context.getString(R.string.section_system), R.string.help_system);
         TextView pinHelp = text(context, context.getString(R.string.settings_pin_help), 13, MUTED, false);
@@ -486,6 +580,8 @@ final class SettingsPanel extends FrameLayout {
         fileActions.addView(button(context, context.getString(R.string.export_settings), host::exportSettings, false), weighted());
         fileActions.addView(button(context, context.getString(R.string.import_settings), host::importSettings, false), weighted());
         currentCard.addView(fileActions);
+        currentCard.addView(button(context, context.getString(R.string.check_update), host::checkForUpdate, false),
+                fullWidth());
         currentCard.addView(button(context, context.getString(R.string.open_system_settings), host::openSystemSettings, false),
                 fullWidth());
         addFooter(context);
@@ -600,7 +696,7 @@ final class SettingsPanel extends FrameLayout {
         Map<String, String> text = ConfigForm.toText(c);
         for (Map.Entry<String, EditText> e : fields.entrySet()) {
             e.getValue().setText(text.get(e.getKey()));
-            e.getValue().setError(null);
+            clearError(e.getValue());
         }
         for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
             e.getValue().setValue(percentOrMin(text.get(e.getKey()), e.getValue()));
@@ -612,44 +708,163 @@ final class SettingsPanel extends FrameLayout {
         scheduleSwitch.setChecked(c.scheduleEnabled);
         dailySwitch.setChecked(c.dailyReloadEnabled);
         sleepSwitch.setChecked(c.sleepEnabled);
+        if (screensaverSwitch != null) screensaverSwitch.setChecked(c.screensaverEnabled);
+        if (screensaverWeatherSwitch != null) screensaverWeatherSwitch.setChecked(c.screensaverWeather);
+        if (screensaverLunarSwitch != null) screensaverLunarSwitch.setChecked(c.screensaverLunar);
         mqttSwitch.setChecked(c.mqttEnabled);
         lanSwitch.setChecked(c.lanEnabled);
         lockSwitch.setChecked(c.lockTaskEnabled);
+        if (assistSwitch != null) assistSwitch.setChecked(c.assistEnabled);
         filling = false;
         resetPinDraft();
     }
 
-    /** 离开输入框或拨动开关时校验并保存；无效内容只标在输入框上。 */
+    /** 离开输入框或拨动开关时校验并保存；MQTT 草稿不在这里写入。无效内容只标在输入框上。 */
     private void commit() {
         if (filling || motionSwitch == null) return;
+        storeForm(false);
+    }
+
+    /** 保存 MQTT 草稿，并按新配置立即连接、上报状态。 */
+    private void saveMqtt() {
+        if (filling || mqttSwitch == null) return;
+        storeForm(true);
+    }
+
+    /**
+     * 校验并保存表单。
+     * mqttDraft 为真时只采用 MQTT 卡片上的开关和输入，其余沿用已保存配置；
+     * 为假时采用当前表单，但 MQTT 仍用已保存值，避免改别的项时把未点保存的 MQTT 草稿写进去。
+     */
+    private void storeForm(boolean mqttDraft) {
+        // 校验、setError 和配置生效都可能触发布局或把焦点送回顶部输入框。
+        scroll.keepPosition();
+        KioskConfig saved = hub.config();
         Map<String, String> text = new HashMap<>();
-        for (Map.Entry<String, EditText> e : fields.entrySet()) {
-            text.put(e.getKey(), e.getValue().getText().toString());
-            e.getValue().setError(null);
+        if (mqttDraft) {
+            text.putAll(ConfigForm.toText(saved));
+            for (String key : MQTT_KEYS) {
+                EditText input = fields.get(key);
+                text.put(key, input == null ? "" : input.getText().toString());
+                clearError(input);
+            }
+        } else {
+            for (Map.Entry<String, EditText> e : fields.entrySet()) {
+                text.put(e.getKey(), e.getValue().getText().toString());
+                clearError(e.getValue());
+            }
+            // 拖动条不在输入框地图里，保存时仍要带上当前整数，避免被校验当成缺省
+            for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
+                text.put(e.getKey(), e.getValue().text());
+            }
+            // 小时不在输入框地图里，必须写入当前选中的小时，不能落回默认 0
+            for (Map.Entry<String, HourField> e : hours.entrySet()) {
+                text.put(e.getKey(), Integer.toString(e.getValue().getHour()));
+            }
+            Map<String, String> savedText = ConfigForm.toText(saved);
+            for (String key : MQTT_KEYS) text.put(key, savedText.get(key));
         }
-        // 拖动条不在输入框地图里，保存时仍要带上当前整数，避免被校验当成缺省
-        for (Map.Entry<String, PercentBar> e : percents.entrySet()) {
-            text.put(e.getKey(), e.getValue().text());
-        }
-        // 小时不在输入框地图里，必须写入当前选中的小时，不能落回默认 0
-        for (Map.Entry<String, HourField> e : hours.entrySet()) {
-            text.put(e.getKey(), Integer.toString(e.getValue().getHour()));
-        }
-        ConfigForm.Result result = ConfigForm.parse(text, motionSwitch.isChecked(), mqttSwitch.isChecked(),
-                lanSwitch.isChecked(), lockSwitch.isChecked(), scheduleSwitch.isChecked(),
-                dailySwitch.isChecked(), sleepSwitch.isChecked());
+        boolean mqttEnabled = mqttDraft ? mqttSwitch.isChecked() : saved.mqttEnabled;
+        ConfigForm.Result result = ConfigForm.parse(text,
+                mqttDraft ? saved.motionEnabled : motionSwitch.isChecked(),
+                mqttEnabled,
+                mqttDraft ? saved.lanEnabled : lanSwitch.isChecked(),
+                mqttDraft ? saved.lockTaskEnabled : lockSwitch.isChecked(),
+                mqttDraft ? saved.scheduleEnabled : scheduleSwitch.isChecked(),
+                mqttDraft ? saved.dailyReloadEnabled : dailySwitch.isChecked(),
+                mqttDraft ? saved.sleepEnabled : sleepSwitch.isChecked(),
+                mqttDraft ? saved.assistEnabled : assistSwitch != null && assistSwitch.isChecked(),
+                mqttDraft || screensaverSwitch == null ? saved.screensaverEnabled : screensaverSwitch.isChecked(),
+                mqttDraft || screensaverWeatherSwitch == null ? saved.screensaverWeather : screensaverWeatherSwitch.isChecked(),
+                mqttDraft || screensaverLunarSwitch == null ? saved.screensaverLunar : screensaverLunarSwitch.isChecked());
         if (!result.ok()) {
             for (Map.Entry<String, String> e : result.errors.entrySet()) {
+                if (mqttDraft && !isMqttKey(e.getKey())) continue;
                 EditText input = fields.get(e.getKey());
                 if (input != null) input.setError(errorText(e.getKey(), e.getValue()));
             }
             return;
         }
         // 这次表单没有设置密码字段，必须沿用已保存的密码，不能写成空
-        KioskConfig next = ConfigForm.preserveSettingsPin(result.config, hub.config().settingsPin);
-        if (next.equals(hub.config())) return;
-        hub.updateConfig(next);
+        KioskConfig next = ConfigForm.preserveSettingsPin(result.config, saved.settingsPin);
+        boolean changed = !next.equals(saved);
+        if (mqttDraft) {
+            awaitingMqtt = true;
+            if (!next.mqttEnabled) {
+                if (changed) hub.updateConfig(next);
+                hub.reportMqttLink(KioskHub.MqttLink.OFF, "", "");
+                refreshStatus();
+                return;
+            }
+            // 先标记由同步任务连接，再保存，避免配置监听和按钮各连一次
+            hub.armMqttSync();
+            hub.reportMqttLink(KioskHub.MqttLink.CONNECTING, mqttEndpoint(next), "");
+            if (changed) hub.updateConfig(next);
+            hub.requestMqttSync();
+            refreshStatus();
+            return;
+        }
+        if (changed) hub.updateConfig(next);
+        if (!changed) return;
+        if (next.assistEnabled && !host.micGranted()) host.requestMicPermission();
         refreshStatus();
+    }
+
+    /** 连接阶段变化时刷新按钮下方的文字；这一次保存的最终结果再弹出提示。 */
+    private void onMqttLink(KioskHub.MqttLink link) {
+        paintMqttLink(link);
+        if (!awaitingMqtt || KioskHub.MqttLink.CONNECTING.equals(link.phase)
+                || KioskHub.MqttLink.IDLE.equals(link.phase)) {
+            return;
+        }
+        awaitingMqtt = false;
+        if (mqttResult == null || mqttResult.getText().length() == 0) return;
+        Toast.makeText(getContext(), mqttResult.getText(), Toast.LENGTH_LONG).show();
+    }
+
+    /** 把最近一次连接地址和成败写到 MQTT 卡片上。 */
+    private void paintMqttLink(KioskHub.MqttLink link) {
+        if (mqttResult == null || link == null) return;
+        if (KioskHub.MqttLink.CONNECTING.equals(link.phase)) {
+            mqttResult.setTextColor(ACCENT);
+            mqttResult.setText(ui.getString(R.string.mqtt_connecting, link.endpoint));
+        } else if (KioskHub.MqttLink.OK.equals(link.phase)) {
+            mqttResult.setTextColor(OK_COLOR);
+            mqttResult.setText(ui.getString(R.string.mqtt_connect_ok, link.endpoint));
+        } else if (KioskHub.MqttLink.FAIL.equals(link.phase)) {
+            mqttResult.setTextColor(FAIL_COLOR);
+            String detail = link.detail == null || link.detail.isEmpty()
+                    ? ui.getString(R.string.mqtt_connect_unknown) : link.detail;
+            mqttResult.setText(ui.getString(R.string.mqtt_connect_fail, link.endpoint, detail));
+        } else if (KioskHub.MqttLink.OFF.equals(link.phase)) {
+            mqttResult.setTextColor(MUTED);
+            mqttResult.setText(ui.getString(R.string.mqtt_connect_off));
+        } else {
+            mqttResult.setText("");
+        }
+        mqttResult.setVisibility(mqttResult.getText().length() == 0 ? GONE : VISIBLE);
+    }
+
+    /** 界面上显示的主机和端口，不带账号和密码。 */
+    private static String mqttEndpoint(KioskConfig config) {
+        String host = config.mqttHost.contains(":") ? "[" + config.mqttHost + "]" : config.mqttHost;
+        return host + ":" + config.mqttPort;
+    }
+
+    /** 是否为 MQTT 卡片上的输入项。 */
+    private static boolean isMqttKey(String key) {
+        for (String mqttKey : MQTT_KEYS) {
+            if (mqttKey.equals(key)) return true;
+        }
+        return false;
+    }
+
+    /** 关掉锁定模式和固定桌面，再交给主界面打开其他应用。 */
+    private void releaseKiosk() {
+        filling = true;
+        if (lockSwitch != null) lockSwitch.setChecked(false);
+        filling = false;
+        host.releaseKiosk();
     }
 
     /** 是否已经保存过设置密码。 */
@@ -664,9 +879,9 @@ final class SettingsPanel extends FrameLayout {
         String current = draftText(pinCurrent);
         String next = draftText(pinNew);
         String again = draftText(pinConfirm);
-        if (pinCurrent != null) pinCurrent.setError(null);
-        pinNew.setError(null);
-        pinConfirm.setError(null);
+        clearError(pinCurrent);
+        clearError(pinNew);
+        clearError(pinConfirm);
         if (!saved.isEmpty() && !current.equals(saved)) {
             pinCurrent.setError(ui.getString(R.string.pin_wrong));
             return;
@@ -712,7 +927,12 @@ final class SettingsPanel extends FrameLayout {
     private static void clearDraft(EditText input) {
         if (input == null) return;
         input.setText("");
-        input.setError(null);
+        clearError(input);
+    }
+
+    /** 没有错误时不要再 setError(null)，否则输入框会请求把自己滚进屏幕。 */
+    private static void clearError(EditText input) {
+        if (input != null && input.getError() != null) input.setError(null);
     }
 
     /** 读取密码草稿，去掉首尾空格。 */
@@ -738,9 +958,19 @@ final class SettingsPanel extends FrameLayout {
         bg.setCornerRadius(dp(14));
         bg.setColor(FIELD);
         input.setBackground(bg);
+        input.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) scroll.noteEditing(input);
+            return false;
+        });
         input.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable drawable = (GradientDrawable) v.getBackground();
             drawable.setStroke(hasFocus ? dp(2) : 0, ACCENT);
+            if (hasFocus) scroll.revealSoon(input);
+            else {
+                scroll.keepPosition();
+                scroll.clearEditing(input);
+                scroll.reclaimUnaskedFocus();
+            }
         });
         input.setOnEditorActionListener((v, actionId, event) -> {
             v.clearFocus();
@@ -913,26 +1143,42 @@ final class SettingsPanel extends FrameLayout {
         return currentCard;
     }
 
-    /** 两个短字段并排，长说明仍各自换行。 */
+    /** 两个短字段并排，离开输入框后保存。 */
     private void pair(Context context, String leftKey, String leftLabel, int leftType,
                       String rightKey, String rightLabel, int rightType) {
+        pair(context, leftKey, leftLabel, leftType, rightKey, rightLabel, rightType, true);
+    }
+
+    /** 两个短字段并排。commitOnBlur 为假时只改显示，等专门的保存按钮写入。 */
+    private void pair(Context context, String leftKey, String leftLabel, int leftType,
+                      String rightKey, String rightLabel, int rightType, boolean commitOnBlur) {
         LinearLayout line = new LinearLayout(context);
         line.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         left.setMarginEnd(dp(10));
-        line.addView(fieldColumn(context, leftKey, leftLabel, leftType), left);
-        line.addView(fieldColumn(context, rightKey, rightLabel, rightType),
+        line.addView(fieldColumn(context, leftKey, leftLabel, leftType, commitOnBlur), left);
+        line.addView(fieldColumn(context, rightKey, rightLabel, rightType, commitOnBlur),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         currentCard.addView(line, fullWidth());
     }
 
-    /** 添加整行输入框。 */
+    /** 添加整行输入框，离开输入框后保存。 */
     private void field(Context context, String key, String label, int inputType) {
-        currentCard.addView(fieldColumn(context, key, label, inputType), fullWidth());
+        field(context, key, label, inputType, true);
+    }
+
+    /** 添加整行输入框。commitOnBlur 为假时不在失焦时写入配置。 */
+    private void field(Context context, String key, String label, int inputType, boolean commitOnBlur) {
+        currentCard.addView(fieldColumn(context, key, label, inputType, commitOnBlur), fullWidth());
+    }
+
+    /** 创建标题加输入框，离开输入框后保存。 */
+    private LinearLayout fieldColumn(Context context, String key, String label, int inputType) {
+        return fieldColumn(context, key, label, inputType, true);
     }
 
     /** 创建标题加输入框，不直接放入卡片，方便并排。 */
-    private LinearLayout fieldColumn(Context context, String key, String label, int inputType) {
+    private LinearLayout fieldColumn(Context context, String key, String label, int inputType, boolean commitOnBlur) {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
         TextView l = text(context, label, 12, MUTED, true);
@@ -948,10 +1194,23 @@ final class SettingsPanel extends FrameLayout {
         bg.setCornerRadius(dp(14));
         bg.setColor(FIELD);
         input.setBackground(bg);
+        input.setOnTouchListener((v, event) -> {
+            // 只有手指点到的输入框才允许为键盘让位，焦点自己跳上去不算
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) scroll.noteEditing(input);
+            return false;
+        });
         input.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable drawable = (GradientDrawable) v.getBackground();
             drawable.setStroke(hasFocus ? dp(2) : 0, ACCENT);
-            if (!hasFocus) commit();
+            if (hasFocus) {
+                scroll.revealSoon(input);
+            } else {
+                // 失焦保存会触发布局；先钉住，再处理焦点跳到顶部输入框的情况
+                scroll.keepPosition();
+                scroll.clearEditing(input);
+                if (commitOnBlur) commit();
+                scroll.reclaimUnaskedFocus();
+            }
         });
         input.setOnEditorActionListener((v, actionId, event) -> {
             v.clearFocus();
@@ -1076,6 +1335,9 @@ final class SettingsPanel extends FrameLayout {
         bar.setMin(min);
         bar.setMax(max);
         bar.setProgress(min);
+        // 拖动条不拿焦点，否则松手后 ScrollView 会把它或别的控件滚进屏幕
+        bar.setFocusable(false);
+        bar.setFocusableInTouchMode(false);
         bar.setSplitTrack(false);
         bar.setContentDescription(label);
         int thumbSize = dp(28);
@@ -1098,8 +1360,11 @@ final class SettingsPanel extends FrameLayout {
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                // 松手后走现有保存；filling 为真时 commit 会直接返回
-                if (!filling) commit();
+                // 松手后走现有保存。先钉住滚动，并放下输入框焦点，避免列表跳走。
+                if (filling) return;
+                scroll.keepPosition();
+                scroll.releaseEditFocus();
+                commit();
             }
         });
         column.addView(bar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
@@ -1164,6 +1429,11 @@ final class SettingsPanel extends FrameLayout {
 
     /** 添加开关行：说明在左，开关在右，拨动后立即保存。 */
     private Switch toggle(Context context, String label) {
+        return toggle(context, label, true);
+    }
+
+    /** 添加开关行。commitOnChange 为假时只改开关，等专门的保存按钮写入。 */
+    private Switch toggle(Context context, String label, boolean commitOnChange) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1174,7 +1444,15 @@ final class SettingsPanel extends FrameLayout {
         row.addView(l, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Switch s = new Switch(context);
         s.setShowText(false);
-        s.setOnCheckedChangeListener((button, checked) -> commit());
+        // 开关不拿焦点。填充表单时会 setChecked，这时不能清焦点也不能保存。
+        s.setFocusable(false);
+        s.setFocusableInTouchMode(false);
+        if (commitOnChange) s.setOnCheckedChangeListener((button, checked) -> {
+            if (filling) return;
+            scroll.keepPosition();
+            scroll.releaseEditFocus();
+            commit();
+        });
         LinearLayout.LayoutParams switchLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         switchLp.setMarginStart(dp(12));
@@ -1200,6 +1478,50 @@ final class SettingsPanel extends FrameLayout {
         buildForm(ui);
         populate(hub.config());
         applySetupChrome();
+    }
+
+    /** 扫描局域网 8123，点一项就写入首页地址。 */
+    private void findHa() {
+        Context context = ui == null ? getContext() : ui;
+        Dialog dialog = new Dialog(getContext());
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, pad, pad, pad);
+        TextView hint = text(context, context.getString(R.string.find_ha_hint), 14, MUTED, false);
+        hint.setLineSpacing(dp(3), 1f);
+        box.addView(hint, fullWidth());
+        TextView status = text(context, context.getString(R.string.find_ha_loading), 15, TEXT, false);
+        box.addView(status, fullWidth());
+        LinearLayout list = new LinearLayout(context);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView scrollList = new ScrollView(context);
+        scrollList.addView(list);
+        box.addView(scrollList, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(240)));
+        dialog.setContentView(box);
+        dialog.show();
+        String local = NetUtil.localIpv4(context);
+        new Thread(() -> {
+            List<String> found = HaDiscovery.scan(local);
+            post(() -> {
+                if (!dialog.isShowing()) return;
+                list.removeAllViews();
+                if (found.isEmpty()) {
+                    status.setText(HaDiscovery.subnetPrefix(local) == null
+                            ? R.string.find_ha_no_lan : R.string.find_ha_empty);
+                    return;
+                }
+                status.setText(R.string.find_ha_done);
+                for (String url : found) {
+                    list.addView(button(context, url, () -> {
+                        EditText home = fields.get(ConfigForm.HOME_URL);
+                        if (home != null) home.setText(url);
+                        commit();
+                        dialog.dismiss();
+                    }, false), fullWidth());
+                }
+            });
+        }, "ha-discovery").start();
     }
 
     /** 打开仪表盘选择。令牌只保存在本机。 */
@@ -1274,7 +1596,8 @@ final class SettingsPanel extends FrameLayout {
 
     void applyLocale(String language) {
         if (language == null || language.equals(shownLanguage)) return;
-        int scrollY = scroll.getScrollY();
+        // 整表重绘会把内容高度瞬间压扁。先钉住，布局完成后再写回，不要在这里 scrollTo。
+        scroll.keepPosition();
         Map<String, String> text = new HashMap<>();
         Map<String, CharSequence> errors = new HashMap<>();
         for (Map.Entry<String, EditText> e : fields.entrySet()) {
@@ -1294,6 +1617,9 @@ final class SettingsPanel extends FrameLayout {
         boolean schedule = scheduleSwitch != null && scheduleSwitch.isChecked();
         boolean daily = dailySwitch != null && dailySwitch.isChecked();
         boolean sleep = sleepSwitch != null && sleepSwitch.isChecked();
+        boolean screensaver = screensaverSwitch != null && screensaverSwitch.isChecked();
+        boolean screensaverWeather = screensaverWeatherSwitch != null && screensaverWeatherSwitch.isChecked();
+        boolean screensaverLunar = screensaverLunarSwitch != null && screensaverLunarSwitch.isChecked();
         boolean mqtt = mqttSwitch != null && mqttSwitch.isChecked();
         boolean lan = lanSwitch != null && lanSwitch.isChecked();
         boolean lock = lockSwitch != null && lockSwitch.isChecked();
@@ -1334,6 +1660,9 @@ final class SettingsPanel extends FrameLayout {
         if (scheduleSwitch != null) scheduleSwitch.setChecked(schedule);
         if (dailySwitch != null) dailySwitch.setChecked(daily);
         if (sleepSwitch != null) sleepSwitch.setChecked(sleep);
+        if (screensaverSwitch != null) screensaverSwitch.setChecked(screensaver);
+        if (screensaverWeatherSwitch != null) screensaverWeatherSwitch.setChecked(screensaverWeather);
+        if (screensaverLunarSwitch != null) screensaverLunarSwitch.setChecked(screensaverLunar);
         if (mqttSwitch != null) mqttSwitch.setChecked(mqtt);
         if (lanSwitch != null) lanSwitch.setChecked(lan);
         if (lockSwitch != null) lockSwitch.setChecked(lock);
@@ -1344,7 +1673,6 @@ final class SettingsPanel extends FrameLayout {
         filling = false;
         refreshStatus();
         applySetupChrome();
-        scroll.post(() -> scroll.scrollTo(0, scrollY));
     }
 
     /** 标题旁只有一个按钮：文字是当前语言，点一下切到另一种并只重建设置文案。 */
@@ -1414,6 +1742,7 @@ final class SettingsPanel extends FrameLayout {
         number.setPadding(0, dp(2), 0, 0);
         cell.addView(name);
         cell.addView(number);
+        statValues.add(number);
         LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         if (statCount % 2 == 0) cellLp.setMarginEnd(dp(8));
         statRow.addView(cell, cellLp);
@@ -1734,6 +2063,360 @@ final class SettingsPanel extends FrameLayout {
             int clamped = Math.max(min, Math.min(max, next));
             bar.setProgress(clamped);
             value.setText(clamped + suffix);
+        }
+    }
+
+    /**
+     * 设置列表。手指拖动和惯性滑动才改变锚点。
+     * 焦点、子矩形、平滑滚动和布局夹紧都写回锚点。
+     * 只有手指正在编辑、且被键盘挡住的那个输入框才允许自动滚进可见区，滚完后锚点改到新位置。
+     */
+    private final class StableScroll extends ScrollView {
+        /** 保存、刷新或布局之后应回到的 scrollY。 */
+        private int anchorY;
+        /** 手指正在拖动列表。 */
+        private boolean userDrag;
+        /** 手指甩动后的惯性滚动。 */
+        private boolean flinging;
+        /** 连续两帧位置不变则认为惯性结束。 */
+        private int flingStable = Integer.MIN_VALUE;
+        /** 正在把被键盘挡住的输入框滚进可见区。 */
+        private boolean revealEdit;
+        /** 这次滚动是校验失败后主动把那个输入框露出来。 */
+        private boolean allowOnce;
+        /** 手指点中、允许为键盘让位的输入框。焦点自己跳上去的不算。 */
+        private EditText editing;
+        /** 当前这次键盘弹出已经为 editing 让过位。 */
+        private boolean revealedForIme;
+        /** 上次见到的键盘底部 inset，变化时才允许再让一次位。 */
+        private int lastIme;
+        /** 布局还没把内容高度量回来时，暂时不要把跳走的位置记成锚点。 */
+        private boolean holdAnchor;
+        /** 写回锚点的剩余尝试次数。大于 0 表示已经排过一次。 */
+        private int restoreAttempts;
+        /** 已经排了收回意外焦点的任务，避免失焦回调互相触发。 */
+        private boolean reclaimPosted;
+        /** 正在主动清掉输入框焦点。 */
+        private boolean releasingFocus;
+        /** 限制自动滚动日志，避免每一帧都打。 */
+        private long lastAutoScrollLogMs;
+
+        /** 使用普通滚动视图的测量和手势，并监听键盘 inset。 */
+        StableScroll(Context context) {
+            super(context);
+            ViewCompat.setOnApplyWindowInsetsListener(this, (v, insets) -> {
+                onImeInset(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom);
+                return insets;
+            });
+        }
+
+        /** 手指按下某个输入框时记下它。只有这个框被键盘挡住才自动滚动。 */
+        void noteEditing(EditText field) {
+            if (field == null || editing == field) return;
+            editing = field;
+            revealedForIme = false;
+        }
+
+        /** 这个输入框失焦后不再为它让位。 */
+        void clearEditing(EditText field) {
+            if (editing != field) return;
+            editing = null;
+            revealedForIme = false;
+        }
+
+        /** 获得焦点后再看一次键盘。没点过的输入框直接忽略。 */
+        void revealSoon(EditText field) {
+            if (field != null && field == editing) post(this::revealEditingIfCovered);
+        }
+
+        /** 校验失败时允许这一次把指定输入框滚进屏幕，并把新位置当成锚点。 */
+        void focusField(View field) {
+            if (field == null) return;
+            allowOnce = true;
+            try {
+                field.requestFocus();
+                anchorY = getScrollY();
+            } finally {
+                allowOnce = false;
+            }
+        }
+
+        /**
+         * 保存或刷新前记下当前位置。
+         * 若 scrollY 已经被改走，保留原锚点，等布局结束后写回。
+         */
+        void keepPosition() {
+            if (moveAllowed()) return;
+            if (!holdAnchor) {
+                int current = getScrollY();
+                // 锚点还是 0 但用户已经滑走时，补记当前可见位置。
+                if (current == anchorY || anchorY == 0) anchorY = current;
+                holdAnchor = true;
+            }
+            if (restoreAttempts > 0) return;
+            restoreAttempts = 4;
+            post(this::restoreHeldPosition);
+        }
+
+        /** 开关、拖动条松手时放下输入框焦点并收起键盘，避免焦点跳走后把列表拉开。 */
+        void releaseEditFocus() {
+            if (releasingFocus) return;
+            View focused = findFocus();
+            if (!(focused instanceof EditText)) return;
+            releasingFocus = true;
+            try {
+                keepPosition();
+                clearEditing((EditText) focused);
+                hideKeyboard();
+                focused.clearFocus();
+                requestFocusFromTouch();
+            } finally {
+                releasingFocus = false;
+            }
+        }
+
+        /** 失焦后如果焦点落到用户没点的输入框上，把焦点还给滚动容器。 */
+        void reclaimUnaskedFocus() {
+            if (reclaimPosted || releasingFocus) return;
+            reclaimPosted = true;
+            post(this::reclaimNow);
+        }
+
+        /** 键盘高度变化时才允许再为输入框让一次位。 */
+        private void onImeInset(int ime) {
+            if (ime <= 0) {
+                revealedForIme = false;
+                lastIme = 0;
+                return;
+            }
+            if (ime != lastIme) {
+                revealedForIme = false;
+                lastIme = ime;
+            }
+            post(this::revealEditingIfCovered);
+        }
+
+        /** 手指拖动、惯性、键盘让位或主动露出错误框时，允许改变 scrollY。 */
+        private boolean moveAllowed() {
+            return userDrag || flinging || revealEdit || allowOnce;
+        }
+
+        /** 子视图还没量出高度时返回 -1，避免把锚点收成 0。 */
+        private int maxScrollY() {
+            if (getChildCount() == 0) return -1;
+            View child = getChildAt(0);
+            int childHeight = child.getHeight();
+            int viewport = getHeight() - getPaddingTop() - getPaddingBottom();
+            if (childHeight <= 0 || viewport <= 0) return -1;
+            return Math.max(0, childHeight - viewport);
+        }
+
+        /** 布局完成后若位置被改走，写回锚点。内容暂时比锚点短就再等一帧。 */
+        private void restoreHeldPosition() {
+            if (moveAllowed()) {
+                holdAnchor = false;
+                restoreAttempts = 0;
+                return;
+            }
+            int max = maxScrollY();
+            if (max < 0 || anchorY > max) {
+                if (--restoreAttempts > 0) {
+                    post(this::restoreHeldPosition);
+                    return;
+                }
+                restoreAttempts = 0;
+                holdAnchor = false;
+                if (max >= 0 && anchorY > max) anchorY = max;
+                else return;
+            } else {
+                restoreAttempts = 0;
+            }
+            int target = Math.min(anchorY, max);
+            int before = getScrollY();
+            if (before != target) {
+                super.scrollTo(getScrollX(), target);
+                if (Math.abs(before - getScrollY()) >= dp(8)) {
+                    Log.i(KioskApp.LOG, "Restored settings scrollY from " + before + " to " + getScrollY());
+                }
+            }
+            holdAnchor = false;
+        }
+
+        /** 执行收回焦点。请求焦点期间不再排队下一次，避免循环。 */
+        private void reclaimNow() {
+            try {
+                View focused = findFocus();
+                if (!(focused instanceof EditText) || focused == editing) return;
+                keepPosition();
+                hideKeyboard();
+                requestFocusFromTouch();
+                Log.i(KioskApp.LOG, "Cleared unasked settings field focus");
+            } finally {
+                reclaimPosted = false;
+            }
+        }
+
+        /** 收起软键盘。不记录输入内容。 */
+        private void hideKeyboard() {
+            InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
+            if (imm != null) imm.hideSoftInputFromWindow(getWindowToken(), 0);
+        }
+
+        /**
+         * 正在编辑的输入框底部被键盘挡住时，只滚动刚好露出它的距离。
+         * 滚完更新锚点，后面的刷新沿用这个位置。
+         */
+        private boolean revealEditingIfCovered() {
+            EditText field = editing;
+            if (field == null || revealedForIme || userDrag || flinging || !field.isFocused() || !field.isShown()) {
+                return false;
+            }
+            WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(this);
+            int ime = insets == null ? 0 : insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            // 没有键盘 inset 就不滚动。可见区域变矮也可能只是系统栏，不能当成键盘。
+            if (ime <= 0) return false;
+            Rect frame = new Rect();
+            getWindowVisibleDisplayFrame(frame);
+            int limit = frame.bottom;
+            View root = getRootView();
+            if (root != null) limit = Math.min(limit, root.getHeight() - ime);
+            int[] loc = new int[2];
+            field.getLocationOnScreen(loc);
+            int margin = dp(12);
+            int top = loc[1];
+            int bottom = top + field.getHeight();
+            int dy = 0;
+            if (bottom + margin > limit) dy = bottom + margin - limit;
+            else if (top < frame.top + margin) dy = top - (frame.top + margin);
+            revealedForIme = true;
+            if (dy == 0) return false;
+            revealEdit = true;
+            try {
+                super.scrollTo(getScrollX(), Math.max(0, getScrollY() + dy));
+                anchorY = getScrollY();
+            } finally {
+                revealEdit = false;
+            }
+            Log.i(KioskApp.LOG, "Scrolled settings to keep the focused field above the keyboard");
+            return true;
+        }
+
+        /** 视口高度变化（键盘或窗口属性）后重新钉住，避免被夹到 0。 */
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            if (oldh > 0 && h != oldh) keepPosition();
+        }
+
+        /** 布局阶段若 scrollY 偏离锚点，内容够高就立刻写回。 */
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            if (moveAllowed()) return;
+            int max = maxScrollY();
+            if (max >= 0 && anchorY <= max && getScrollY() != anchorY) {
+                int before = getScrollY();
+                super.scrollTo(getScrollX(), anchorY);
+                if (Math.abs(before - getScrollY()) >= dp(8)) {
+                    Log.i(KioskApp.LOG, "Restored settings scrollY from " + before + " to " + getScrollY());
+                }
+            } else if (max >= 0 && anchorY > max) {
+                keepPosition();
+            }
+        }
+
+        /** 开始拖动后不再把这次手势写回旧锚点。 */
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            boolean intercepted = super.onInterceptTouchEvent(ev);
+            if (intercepted && ev.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                userDrag = true;
+                flinging = false;
+                holdAnchor = false;
+            }
+            return intercepted;
+        }
+
+        /** 手指滑动更新锚点；松手后若没有惯性，停住的位置就是新锚点。 */
+        @Override
+        public boolean onTouchEvent(MotionEvent ev) {
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_MOVE) {
+                userDrag = true;
+                flinging = false;
+                holdAnchor = false;
+            }
+            boolean handled = super.onTouchEvent(ev);
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                userDrag = false;
+                if (!flinging) anchorY = getScrollY();
+            }
+            return handled;
+        }
+
+        /** 惯性滑动过程中每一帧都更新锚点，结束后不再接受程序滚动。 */
+        @Override
+        public void fling(int velocityY) {
+            flinging = true;
+            flingStable = Integer.MIN_VALUE;
+            super.fling(velocityY);
+        }
+
+        /** 惯性停稳后清掉标记。程序触发的平滑滚动不会把 flinging 设为真。 */
+        @Override
+        public void computeScroll() {
+            int before = getScrollY();
+            super.computeScroll();
+            if (!flinging) return;
+            anchorY = getScrollY();
+            if (getScrollY() == before) {
+                if (flingStable == before) flinging = false;
+                else flingStable = before;
+            } else {
+                flingStable = Integer.MIN_VALUE;
+            }
+        }
+
+        /**
+         * 触摸和惯性会走到这里，并且可能直接改 scrollY，不经过 scrollTo。
+         * 其余来源（焦点平滑滚动）直接丢掉。
+         */
+        @Override
+        protected void onOverScrolled(int scrollX, int scrollY, boolean clampedX, boolean clampedY) {
+            if (moveAllowed()) {
+                super.onOverScrolled(scrollX, scrollY, clampedX, clampedY);
+                anchorY = getScrollY();
+                return;
+            }
+            if (Math.abs(scrollY - anchorY) >= dp(8)) {
+                long now = SystemClock.uptimeMillis();
+                if (now - lastAutoScrollLogMs > 1000) {
+                    lastAutoScrollLogMs = now;
+                    Log.i(KioskApp.LOG, "Ignored settings autoscroll toward " + scrollY);
+                }
+            }
+        }
+
+        /** 布局夹紧和 requestChildFocus 都会调用这里。非用户滚动一律写回锚点。 */
+        @Override
+        public void scrollTo(int x, int y) {
+            int target = moveAllowed() ? y : anchorY;
+            super.scrollTo(x, target);
+            if (moveAllowed()) anchorY = getScrollY();
+        }
+
+        /** 焦点要把某个子矩形滚进屏幕时默认拒绝。主动 focusField 时放行一次。 */
+        @Override
+        public boolean requestChildRectangleOnScreen(View child, Rect rectangle, boolean immediate) {
+            if (!allowOnce) return false;
+            return super.requestChildRectangleOnScreen(child, rectangle, immediate);
+        }
+
+        /** 计算滚动量时默认返回 0，避免开关、顶部输入框获焦把列表拉开。 */
+        @Override
+        protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) {
+            if (!allowOnce) return 0;
+            return super.computeScrollDeltaToGetChildRectOnScreen(rect);
         }
     }
 

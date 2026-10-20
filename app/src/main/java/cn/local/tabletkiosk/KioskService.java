@@ -23,10 +23,12 @@ public final class KioskService extends Service {
     private static final int NOTIFICATION_ID = 1;
 
     private KioskHub hub;
+    private AssistRuntime assist;
     private MqttBridge mqtt;
     private LanServer lan;
     private ExecutorService lanWorker;
     private final Runnable statusListener = this::onStatusChanged;
+    private final Runnable mqttSyncListener = this::onMqttSync;
     private final Consumer<KioskConfig> configListener = this::onConfigChanged;
 
     /** 电池广播：电量或充电状态变化时更新状态中心。 */
@@ -43,6 +45,7 @@ public final class KioskService extends Service {
         super.onCreate();
         enterForeground();
         hub = KioskHub.get();
+        assist = AssistRuntime.start(this);
         mqtt = new MqttBridge(hub, this);
         hub.setImageSink(mqtt::publishScreenshot);
         lan = new LanServer(hub);
@@ -55,6 +58,7 @@ public final class KioskService extends Service {
 
         hub.addStatusListener(statusListener);
         hub.addConfigListener(configListener);
+        hub.addMqttSyncListener(mqttSyncListener);
         onConfigChanged(hub.config());
         Log.i(KioskApp.LOG, "Kiosk service started");
     }
@@ -86,11 +90,13 @@ public final class KioskService extends Service {
     public void onDestroy() {
         hub.removeStatusListener(statusListener);
         hub.removeConfigListener(configListener);
+        hub.removeMqttSyncListener(mqttSyncListener);
         try {
             unregisterReceiver(batteryReceiver);
         } catch (IllegalArgumentException e) {
             Log.w(KioskApp.LOG, "Battery receiver was not registered", e);
         }
+        if (assist != null) assist.shutdown();
         mqtt.shutdown();
         lanWorker.execute(lan::stop);
         lanWorker.shutdown();
@@ -114,10 +120,18 @@ public final class KioskService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
             if (cameraInForeground()) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+            if (microphoneInForeground()) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
             startForeground(NOTIFICATION_ID, notification, type);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
+    }
+
+    /** 语音助手已开且有麦克风权限时，前台服务声明麦克风类型，息屏后仍能听唤醒词。 */
+    private boolean microphoneInForeground() {
+        KioskConfig config = hub == null ? null : hub.config();
+        return config != null && config.assistEnabled
+                && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** 人体检测已开且有摄像头权限时，前台服务声明摄像头类型，息屏后才能继续检测。 */
@@ -148,10 +162,16 @@ public final class KioskService extends Service {
         mqtt.publishState();
     }
 
+    /** 保存按钮要求立刻按当前配置连接并上报。 */
+    private void onMqttSync() {
+        mqtt.syncNow();
+    }
+
     /** 配置变化时更新 MQTT 和局域网接口；端口绑定放到后台线程。 */
     private void onConfigChanged(KioskConfig config) {
         mqtt.apply(config);
         lanWorker.execute(() -> lan.apply(config));
+        if (assist != null) assist.apply();
         enterForeground();
     }
 }

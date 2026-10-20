@@ -48,6 +48,11 @@ public final class KioskHub {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<Runnable> statusListeners = new CopyOnWriteArrayList<>();
     private final List<Consumer<KioskConfig>> configListeners = new CopyOnWriteArrayList<>();
+    private final List<Runnable> mqttSyncListeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<MqttLink>> mqttLinkListeners = new CopyOnWriteArrayList<>();
+    /** 为真时，配置监听里的重连让给紧接着的「保存并同步」，避免连两次。 */
+    private volatile boolean mqttSyncArmed;
+    private volatile MqttLink mqttLink = MqttLink.idle();
     private volatile KioskConfig config;
     private volatile KioskStatus status = KioskStatus.initial();
     private volatile boolean reopenSettings;
@@ -150,6 +155,62 @@ public final class KioskHub {
     /** 取消配置变化监听。 */
     public void removeConfigListener(Consumer<KioskConfig> listener) {
         configListeners.remove(listener);
+    }
+
+    /** 下一次配置应用先不要自己连接，交给随后的同步。 */
+    public void armMqttSync() {
+        mqttSyncArmed = true;
+    }
+
+    /** 同步任务是否正要接手这次连接。 */
+    public boolean mqttSyncArmed() {
+        return mqttSyncArmed;
+    }
+
+    /** 同步任务开始后清掉接手标记。 */
+    public void clearMqttSyncArmed() {
+        mqttSyncArmed = false;
+    }
+
+    /** 最近一次 MQTT 连接结果。面板重建后仍用来显示。 */
+    public MqttLink mqttLink() {
+        return mqttLink;
+    }
+
+    /** 记下连接阶段或结果，并在主线程通知设置面板。detail 不得含密码。 */
+    public void reportMqttLink(String phase, String endpoint, String detail) {
+        MqttLink next = new MqttLink(phase, endpoint, detail);
+        mqttLink = next;
+        runOnMain(() -> {
+            for (Consumer<MqttLink> listener : mqttLinkListeners) listener.accept(next);
+        });
+    }
+
+    /** 注册连接结果监听，回调在主线程。 */
+    public void addMqttLinkListener(Consumer<MqttLink> listener) {
+        mqttLinkListeners.add(listener);
+    }
+
+    /** 取消连接结果监听。 */
+    public void removeMqttLinkListener(Consumer<MqttLink> listener) {
+        mqttLinkListeners.remove(listener);
+    }
+
+    /** 按当前已保存的 MQTT 配置立即连接并上报。配置没变时也会触发。 */
+    public void requestMqttSync() {
+        runOnMain(() -> {
+            for (Runnable listener : mqttSyncListeners) listener.run();
+        });
+    }
+
+    /** 注册立即同步监听，回调在主线程。 */
+    public void addMqttSyncListener(Runnable listener) {
+        mqttSyncListeners.add(listener);
+    }
+
+    /** 取消立即同步监听。 */
+    public void removeMqttSyncListener(Runnable listener) {
+        mqttSyncListeners.remove(listener);
     }
 
     /** 主界面创建和销毁时设置控制器。 */
@@ -335,6 +396,31 @@ public final class KioskHub {
     private void runOnMain(Runnable task) {
         if (Looper.myLooper() == Looper.getMainLooper()) task.run();
         else main.post(task);
+    }
+
+    /** 一次 MQTT 连接的显示内容。phase 取 idle、connecting、ok、fail、off。 */
+    public static final class MqttLink {
+        public static final String IDLE = "idle";
+        public static final String CONNECTING = "connecting";
+        public static final String OK = "ok";
+        public static final String FAIL = "fail";
+        public static final String OFF = "off";
+
+        public final String phase;
+        public final String endpoint;
+        public final String detail;
+
+        /** 空结果，设置面板打开前使用。 */
+        public static MqttLink idle() {
+            return new MqttLink(IDLE, "", "");
+        }
+
+        /** 记录阶段、地址和失败说明。说明由调用方去掉密码。 */
+        public MqttLink(String phase, String endpoint, String detail) {
+            this.phase = phase == null ? IDLE : phase;
+            this.endpoint = endpoint == null ? "" : endpoint;
+            this.detail = detail == null ? "" : detail;
+        }
     }
 
     /** 比较两个状态快照的全部字段。 */
