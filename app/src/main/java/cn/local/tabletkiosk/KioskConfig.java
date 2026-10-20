@@ -13,6 +13,14 @@ public final class KioskConfig {
     public final int watchBrightness;
     public final int standbyBrightness;
     public final int dimDelaySeconds;
+    /** 是否盖上待机屏保。关掉后仍按待机亮度变暗，夜间息屏逻辑不变。 */
+    public final boolean screensaverEnabled;
+    /** 屏保上是否绘制天气。关掉后不向 Home Assistant 请求天气。 */
+    public final boolean screensaverWeather;
+    /** 屏保上是否绘制农历。 */
+    public final boolean screensaverLunar;
+    /** 屏保正在显示时的窗口亮度百分比，0 最暗，与观看、待机亮度分开。 */
+    public final int screensaverBrightness;
     public final boolean motionEnabled;
     public final int motionSensitivity;
     public final int presenceHoldSeconds;
@@ -42,6 +50,8 @@ public final class KioskConfig {
     public final int volume;
     public final String settingsPin;
     public final int watchdogSeconds;
+    public final boolean assistEnabled;
+    public final int wakeSensitivity;
 
     /** 由构建器生成配置，空字符串统一转为非 null。 */
     private KioskConfig(Builder b) {
@@ -51,6 +61,10 @@ public final class KioskConfig {
         watchBrightness = b.watchBrightness;
         standbyBrightness = b.standbyBrightness;
         dimDelaySeconds = b.dimDelaySeconds;
+        screensaverEnabled = b.screensaverEnabled;
+        screensaverWeather = b.screensaverWeather;
+        screensaverLunar = b.screensaverLunar;
+        screensaverBrightness = b.screensaverBrightness;
         motionEnabled = b.motionEnabled;
         motionSensitivity = b.motionSensitivity;
         presenceHoldSeconds = b.presenceHoldSeconds;
@@ -80,6 +94,8 @@ public final class KioskConfig {
         volume = b.volume;
         settingsPin = nonNull(b.settingsPin);
         watchdogSeconds = b.watchdogSeconds;
+        assistEnabled = b.assistEnabled;
+        wakeSensitivity = b.wakeSensitivity;
     }
 
     /** 返回首次启动使用的默认配置。 */
@@ -96,6 +112,10 @@ public final class KioskConfig {
         b.watchBrightness = watchBrightness;
         b.standbyBrightness = standbyBrightness;
         b.dimDelaySeconds = dimDelaySeconds;
+        b.screensaverEnabled = screensaverEnabled;
+        b.screensaverWeather = screensaverWeather;
+        b.screensaverLunar = screensaverLunar;
+        b.screensaverBrightness = screensaverBrightness;
         b.motionEnabled = motionEnabled;
         b.motionSensitivity = motionSensitivity;
         b.presenceHoldSeconds = presenceHoldSeconds;
@@ -125,6 +145,8 @@ public final class KioskConfig {
         b.volume = volume;
         b.settingsPin = settingsPin;
         b.watchdogSeconds = watchdogSeconds;
+        b.assistEnabled = assistEnabled;
+        b.wakeSensitivity = wakeSensitivity;
         return b;
     }
 
@@ -154,7 +176,9 @@ public final class KioskConfig {
         KioskConfig c = (KioskConfig) o;
         return idleReloadHours == c.idleReloadHours && retrySeconds == c.retrySeconds
                 && watchBrightness == c.watchBrightness && standbyBrightness == c.standbyBrightness
-                && dimDelaySeconds == c.dimDelaySeconds && motionEnabled == c.motionEnabled
+                && dimDelaySeconds == c.dimDelaySeconds && screensaverEnabled == c.screensaverEnabled
+                && screensaverWeather == c.screensaverWeather && screensaverLunar == c.screensaverLunar
+                && screensaverBrightness == c.screensaverBrightness && motionEnabled == c.motionEnabled
                 && motionSensitivity == c.motionSensitivity && presenceHoldSeconds == c.presenceHoldSeconds
                 && mqttStateIntervalSeconds == c.mqttStateIntervalSeconds && lockTaskEnabled == c.lockTaskEnabled
                 && scheduleEnabled == c.scheduleEnabled && dayStartHour == c.dayStartHour
@@ -163,6 +187,7 @@ public final class KioskConfig {
                 && dailyReloadHour == c.dailyReloadHour && dailyReloadMinute == c.dailyReloadMinute
                 && sleepEnabled == c.sleepEnabled && sleepStartHour == c.sleepStartHour
                 && sleepEndHour == c.sleepEndHour && volume == c.volume && watchdogSeconds == c.watchdogSeconds
+                && assistEnabled == c.assistEnabled && wakeSensitivity == c.wakeSensitivity
                 && settingsPin.equals(c.settingsPin)
                 && homeUrl.equals(c.homeUrl) && sameMqttConnection(c) && sameLanServer(c);
     }
@@ -170,11 +195,12 @@ public final class KioskConfig {
     @Override
     public int hashCode() {
         return Objects.hash(homeUrl, idleReloadHours, retrySeconds, watchBrightness, standbyBrightness,
-                dimDelaySeconds, motionEnabled, motionSensitivity, presenceHoldSeconds, mqttEnabled, mqttHost,
+                dimDelaySeconds, screensaverEnabled, screensaverWeather, screensaverLunar, screensaverBrightness,
+                motionEnabled, motionSensitivity, presenceHoldSeconds, mqttEnabled, mqttHost,
                 mqttPort, mqttUsername, mqttBaseTopic, mqttDiscoveryPrefix, mqttStateIntervalSeconds, lanEnabled,
                 lanPort, lockTaskEnabled, scheduleEnabled, dayStartHour, nightStartHour, dayBrightness,
                 nightBrightness, dailyReloadEnabled, dailyReloadHour, dailyReloadMinute, sleepEnabled,
-                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds);
+                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds, assistEnabled, wakeSensitivity);
     }
 
     /** 可变构建器，字段初值即首次启动的默认值。 */
@@ -185,6 +211,14 @@ public final class KioskConfig {
         public int watchBrightness = 70;
         public int standbyBrightness = 20;
         public int dimDelaySeconds = 60;
+        /** 默认打开，保持升级前会盖屏保的行为。 */
+        public boolean screensaverEnabled = true;
+        /** 默认在屏保上显示天气。 */
+        public boolean screensaverWeather = true;
+        /** 默认在屏保上显示农历。 */
+        public boolean screensaverLunar = true;
+        /** 默认与待机亮度相同，避免旧配置突然变亮或全黑。 */
+        public int screensaverBrightness = 20;
         public boolean motionEnabled = true;
         public int motionSensitivity = 50;
         public int presenceHoldSeconds = 10;
@@ -214,6 +248,8 @@ public final class KioskConfig {
         public int volume = 70;
         public String settingsPin = "";
         public int watchdogSeconds = 0;
+        public boolean assistEnabled = false;
+        public int wakeSensitivity = 50;
 
         /** 生成不可变配置。 */
         public KioskConfig build() {

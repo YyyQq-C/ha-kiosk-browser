@@ -40,6 +40,10 @@ public final class SettingsFile {
         json.put("scheduleEnabled", config.scheduleEnabled);
         json.put("dailyReloadEnabled", config.dailyReloadEnabled);
         json.put("sleepEnabled", config.sleepEnabled);
+        json.put("assistEnabled", config.assistEnabled);
+        json.put("screensaverEnabled", config.screensaverEnabled);
+        json.put("screensaverWeather", config.screensaverWeather);
+        json.put("screensaverLunar", config.screensaverLunar);
         for (Map.Entry<String, String> entry : ConfigForm.toText(config).entrySet()) {
             json.put(entry.getKey(), entry.getValue());
         }
@@ -53,13 +57,21 @@ public final class SettingsFile {
         Map<String, String> text = new LinkedHashMap<>(raw);
         ConfigForm.Result result = ConfigForm.parse(text, flag(raw, "motionEnabled"), flag(raw, "mqttEnabled"),
                 flag(raw, "lanEnabled"), flag(raw, "lockTaskEnabled"), flag(raw, "scheduleEnabled"),
-                flag(raw, "dailyReloadEnabled"), flag(raw, "sleepEnabled"));
+                flag(raw, "dailyReloadEnabled"), flag(raw, "sleepEnabled"), flag(raw, "assistEnabled"),
+                flag(raw, "screensaverEnabled", true), flag(raw, "screensaverWeather", true),
+                flag(raw, "screensaverLunar", true));
         if (result.config == null) return new Document(null, "", "", "invalid settings values");
         return new Document(result.config, raw.get(LANGUAGE), raw.get(HA_TOKEN), null);
     }
 
     /** JSON 布尔文本。缺键视为 false。 */
     private static boolean flag(Map<String, String> raw, String key) {
+        return flag(raw, key, false);
+    }
+
+    /** JSON 布尔文本。缺键时用 fallback，避免旧文件把新增的屏保开关读成关闭。 */
+    private static boolean flag(Map<String, String> raw, String key, boolean fallback) {
+        if (!raw.containsKey(key)) return fallback;
         return "true".equals(raw.get(key));
     }
 }

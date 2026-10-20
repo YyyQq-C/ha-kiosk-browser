@@ -12,6 +12,7 @@ public final class ConfigForm {
     public static final String WATCH_BRIGHTNESS = "watch_brightness";
     public static final String STANDBY_BRIGHTNESS = "standby_brightness";
     public static final String DIM_DELAY_SECONDS = "dim_delay_seconds";
+    public static final String SCREENSAVER_BRIGHTNESS = "screensaver_brightness";
     public static final String MOTION_SENSITIVITY = "motion_sensitivity";
     public static final String PRESENCE_HOLD_SECONDS = "presence_hold_seconds";
     public static final String MQTT_HOST = "mqtt_host";
@@ -34,6 +35,7 @@ public final class ConfigForm {
     public static final String VOLUME = "volume";
     public static final String SETTINGS_PIN = "settings_pin";
     public static final String WATCHDOG_SECONDS = "watchdog_seconds";
+    public static final String WAKE_SENSITIVITY = "wake_sensitivity";
 
     public static final int MIN_LAN_PASSWORD_LENGTH = 8;
     /** 校验失败时写入 errors 的稳定代码，界面按系统语言翻译。 */
@@ -85,6 +87,33 @@ public final class ConfigForm {
     public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
                                boolean lanEnabled, boolean lockTaskEnabled, boolean scheduleEnabled,
                                boolean dailyReloadEnabled, boolean sleepEnabled) {
+        return parse(text, motionEnabled, mqttEnabled, lanEnabled, lockTaskEnabled, scheduleEnabled,
+                dailyReloadEnabled, sleepEnabled, false);
+    }
+
+    /**
+     * 校验全部输入。
+     *
+     * @param assistEnabled 语音助手常驻唤醒
+     */
+    public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
+                               boolean lanEnabled, boolean lockTaskEnabled, boolean scheduleEnabled,
+                               boolean dailyReloadEnabled, boolean sleepEnabled, boolean assistEnabled) {
+        return parse(text, motionEnabled, mqttEnabled, lanEnabled, lockTaskEnabled, scheduleEnabled,
+                dailyReloadEnabled, sleepEnabled, assistEnabled, true, true, true);
+    }
+
+    /**
+     * 校验全部输入。屏保三个开关缺省为打开，保持旧调用的现有行为。
+     *
+     * @param screensaverEnabled 是否盖上待机屏保
+     * @param screensaverWeather 屏保是否显示天气
+     * @param screensaverLunar 屏保是否显示农历
+     */
+    public static Result parse(Map<String, String> text, boolean motionEnabled, boolean mqttEnabled,
+                               boolean lanEnabled, boolean lockTaskEnabled, boolean scheduleEnabled,
+                               boolean dailyReloadEnabled, boolean sleepEnabled, boolean assistEnabled,
+                               boolean screensaverEnabled, boolean screensaverWeather, boolean screensaverLunar) {
         Map<String, String> errors = new LinkedHashMap<>();
         KioskConfig.Builder b = new KioskConfig.Builder();
 
@@ -102,6 +131,15 @@ public final class ConfigForm {
         b.watchBrightness = number(text, WATCH_BRIGHTNESS, 1, 100, errors);
         b.standbyBrightness = number(text, STANDBY_BRIGHTNESS, 0, 100, errors);
         b.dimDelaySeconds = number(text, DIM_DELAY_SECONDS, 0, 86400, errors);
+        b.screensaverEnabled = screensaverEnabled;
+        b.screensaverWeather = screensaverWeather;
+        b.screensaverLunar = screensaverLunar;
+        // 旧配置没有屏保亮度时跟待机亮度走，避免升级后突然变亮或全黑
+        if (blank(text, SCREENSAVER_BRIGHTNESS)) {
+            b.screensaverBrightness = b.standbyBrightness;
+        } else {
+            b.screensaverBrightness = number(text, SCREENSAVER_BRIGHTNESS, 0, 100, errors);
+        }
         b.motionEnabled = motionEnabled;
         b.motionSensitivity = number(text, MOTION_SENSITIVITY, 0, 100, errors);
         b.presenceHoldSeconds = number(text, PRESENCE_HOLD_SECONDS, 1, 3600, errors);
@@ -154,6 +192,9 @@ public final class ConfigForm {
             }
         }
         b.watchdogSeconds = number(text, WATCHDOG_SECONDS, 0, 3600, errors);
+        b.assistEnabled = assistEnabled;
+        if (!text.containsKey(WAKE_SENSITIVITY)) text.put(WAKE_SENSITIVITY, "50");
+        b.wakeSensitivity = number(text, WAKE_SENSITIVITY, 0, 100, errors);
         return errors.isEmpty() ? new Result(b.build(), errors) : new Result(null, errors);
     }
 
@@ -179,6 +220,7 @@ public final class ConfigForm {
         m.put(WATCH_BRIGHTNESS, Integer.toString(c.watchBrightness));
         m.put(STANDBY_BRIGHTNESS, Integer.toString(c.standbyBrightness));
         m.put(DIM_DELAY_SECONDS, Integer.toString(c.dimDelaySeconds));
+        m.put(SCREENSAVER_BRIGHTNESS, Integer.toString(c.screensaverBrightness));
         m.put(MOTION_SENSITIVITY, Integer.toString(c.motionSensitivity));
         m.put(PRESENCE_HOLD_SECONDS, Integer.toString(c.presenceHoldSeconds));
         m.put(MQTT_HOST, c.mqttHost);
@@ -201,6 +243,7 @@ public final class ConfigForm {
         m.put(VOLUME, Integer.toString(c.volume));
         m.put(SETTINGS_PIN, c.settingsPin);
         m.put(WATCHDOG_SECONDS, Integer.toString(c.watchdogSeconds));
+        m.put(WAKE_SENSITIVITY, Integer.toString(c.wakeSensitivity));
         return m;
     }
 
@@ -215,6 +258,11 @@ public final class ConfigForm {
         }
         errors.put(key, ERR_RANGE_PREFIX + min + ":" + max);
         return min;
+    }
+
+    /** 键不存在或只有空白时视为缺省，供旧配置回落默认。 */
+    private static boolean blank(Map<String, String> text, String key) {
+        return !text.containsKey(key) || raw(text, key).trim().isEmpty();
     }
 
     /** 读取并去掉首尾空格。 */
