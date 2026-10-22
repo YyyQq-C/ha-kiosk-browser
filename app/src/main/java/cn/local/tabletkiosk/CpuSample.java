@@ -22,26 +22,50 @@ public final class CpuSample {
         if (parts.length < 5 || !"cpu".equals(parts[0])) return null;
         long total = 0;
         long idle = 0;
-        for (int i = 1; i < parts.length; i++) {
+        // guest 和 guest_nice 已包含在 user、nice 中，不能再次累加。
+        for (int i = 1; i < Math.min(parts.length, 9); i++) {
             long value;
             try {
                 value = Long.parseLong(parts[i]);
             } catch (NumberFormatException e) {
                 return null;
             }
+            if (value < 0 || Long.MAX_VALUE - total < value) return null;
             total += value;
             if (i == 4 || i == 5) idle += value;
         }
         return new CpuSample(total, idle);
     }
 
-    /** 读取当前总 CPU 计数；读不到时返回 null。 */
-    static CpuSample read() {
+    /** 读取整机 CPU 计数；让采样器记录读取异常并选择备用来源。 */
+    static CpuSample read() throws IOException {
         try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
             return parse(reader.readLine());
-        } catch (IOException | SecurityException e) {
-            return null;
         }
+    }
+
+    /** 从系统接口的活跃时间和总时间生成同一语义的计数。 */
+    static CpuSample fromActive(long active, long total) {
+        if (active < 0 || total <= 0 || active > total) return null;
+        return new CpuSample(total, total - active);
+    }
+
+    /** 只累计前后两次都在线的核心增量，避免核心上下线造成占用跳变。 */
+    static int percent(CpuSample[] previous, CpuSample[] current) {
+        if (previous == null || current == null) return -1;
+        long total = 0;
+        long idle = 0;
+        for (int i = 0; i < Math.min(previous.length, current.length); i++) {
+            CpuSample before = previous[i];
+            CpuSample after = current[i];
+            if (before == null || after == null) continue;
+            long delta = after.total - before.total;
+            long idleDelta = after.idle - before.idle;
+            if (delta <= 0 || idleDelta < 0 || idleDelta > delta) continue;
+            total += delta;
+            idle += idleDelta;
+        }
+        return total > 0 ? (int) Math.round((total - idle) * 100.0 / total) : -1;
     }
 
     /** 两次采样之间的占用百分比。间隔无效时返回 -1。 */

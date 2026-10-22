@@ -503,6 +503,8 @@ final class SettingsPanel extends FrameLayout {
         section(context, context.getString(R.string.section_assist), R.string.help_assist);
         assistSwitch = toggle(context, context.getString(R.string.assist_switch));
         percent(context, ConfigForm.WAKE_SENSITIVITY, context.getString(R.string.wake_sensitivity), 0, 100);
+        field(context, ConfigForm.SPEECH_WAIT_SECONDS, context.getString(R.string.speech_wait_seconds),
+                InputType.TYPE_CLASS_NUMBER);
         TextView assistHint = text(context, context.getString(R.string.assist_hint), 13, MUTED, false);
         assistHint.setPadding(dp(2), dp(4), dp(2), dp(8));
         currentCard.addView(assistHint, fullWidth());
@@ -1576,7 +1578,13 @@ final class SettingsPanel extends FrameLayout {
         Context context = ui == null ? getContext() : ui;
         list.removeAllViews();
         if (outcome.error != null) {
-            int message = "unauthorized".equals(outcome.error) ? R.string.dashboard_unauthorized : R.string.dashboard_unreachable;
+            int message = switch (outcome.error) {
+                case "unauthorized" -> R.string.dashboard_unauthorized;
+                case "forbidden" -> R.string.dashboard_forbidden;
+                case "invalid_url" -> R.string.dashboard_invalid_url;
+                case "bad_response" -> R.string.dashboard_bad_response;
+                default -> R.string.dashboard_unreachable;
+            };
             list.addView(text(context, context.getString(message), 14, TEXT, false));
             return;
         }
@@ -1847,6 +1855,8 @@ final class SettingsPanel extends FrameLayout {
                 return R.string.label_volume;
             case ConfigForm.WATCHDOG_SECONDS:
                 return R.string.label_watchdog;
+            case ConfigForm.SPEECH_WAIT_SECONDS:
+                return R.string.speech_wait_seconds;
             case ConfigForm.MOTION_SENSITIVITY:
                 return R.string.label_sensitivity;
             case ConfigForm.PRESENCE_HOLD_SECONDS:

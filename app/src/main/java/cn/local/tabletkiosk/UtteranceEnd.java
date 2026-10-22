@@ -1,6 +1,6 @@
 package cn.local.tabletkiosk;
 
-/** 判断一句语音该停：静音约 1.2 秒，或最长 15 秒。 */
+/** 开始说话后，停顿约 1.2 秒或说满 15 秒结束；初始无语音等待由单独超时处理。 */
 public final class UtteranceEnd {
     public static final int SILENCE_MS = 1200;
     public static final int MAX_MS = 15000;
@@ -18,10 +18,9 @@ public final class UtteranceEnd {
 
     /** 喂入当前块的响度。到点返回 true。 */
     public boolean finished(int rms, long now) {
-        if (started < 0) {
-            started = now;
-            lastLoud = now;
-        }
+        // 没有说过话时不因 1.2 秒安静而提交空录音。
+        if (started < 0 && rms < LOUD) return false;
+        if (started < 0) started = now;
         if (rms >= LOUD) lastLoud = now;
         return now - started >= MAX_MS || now - lastLoud >= SILENCE_MS;
     }

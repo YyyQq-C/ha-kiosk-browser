@@ -33,4 +33,31 @@ public class BrightnessScheduleTest {
         assertFalse(BrightnessSchedule.isDay(22, 7, 12));
         assertTrue(BrightnessSchedule.isDay(8, 8, 3));
     }
+    /** 设置打开期间，即使观看计时被配置更新重算，也不能切到 0% 待机或屏保亮度。 */
+    @org.junit.Test
+    public void settingsHoldBrightnessAcrossTimerAndConfigUpdates() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.watchBrightness = 65;
+        builder.standbyBrightness = 0;
+        builder.screensaverBrightness = 0;
+        builder.scheduleEnabled = false;
+        KioskConfig config = builder.build();
+        PresenceTracker presence = new PresenceTracker(1, 1, 0);
+        for (int tick = 1; tick <= 10; tick++) {
+            presence.tick(tick * 1000L);
+            assertEquals(65, BrightnessSchedule.currentBrightness(config, 12, presence.watching(), true, true));
+            presence.onActivity(tick * 1000L);
+            assertEquals(65, BrightnessSchedule.currentBrightness(config, 12, presence.watching(), false, true));
+        }
+        // 离开设置后仍按原规则进入待机或屏保。
+        assertEquals(0, BrightnessSchedule.currentBrightness(config, 12, false, false, false));
+        assertEquals(0, BrightnessSchedule.currentBrightness(config, 12, false, true, false));
+        builder.scheduleEnabled = true;
+        builder.dayStartHour = 7;
+        builder.nightStartHour = 20;
+        builder.dayBrightness = 80;
+        builder.nightBrightness = 35;
+        assertEquals(80, BrightnessSchedule.currentBrightness(builder.build(), 12, false, false, true));
+        assertEquals(35, BrightnessSchedule.currentBrightness(builder.build(), 22, false, false, true));
+    }
 }

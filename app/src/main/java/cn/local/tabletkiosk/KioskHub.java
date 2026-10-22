@@ -13,6 +13,9 @@ import java.util.function.UnaryOperator;
 public final class KioskHub {
     /** 主界面实现的控制接口，只在主线程调用。 */
     public interface Controller {
+        /** 新界面接管时停止旧实例的计时和采集，避免多个实例共同写运行状态。 */
+        void onControllerReplaced();
+
         /** 清缓存并重载当前页。 */
         void reload();
 
@@ -213,9 +216,23 @@ public final class KioskHub {
         mqttSyncListeners.remove(listener);
     }
 
-    /** 主界面创建和销毁时设置控制器。 */
+    /** 新主界面接管控制权，同时让旧实例退出。所有调用均在主线程。 */
     public void setController(Controller next) {
+        Controller previous = controller;
         controller = next;
+        if (previous != null && previous != next) previous.onControllerReplaced();
+    }
+
+    /** 判断回调是否来自当前控制器，过期实例不能再写共享状态。 */
+    public boolean isController(Controller candidate) {
+        return controller == candidate;
+    }
+
+    /** 只释放调用方自己的控制权，旧实例销毁不能清掉新实例。 */
+    public boolean clearController(Controller expected) {
+        if (controller != expected) return false;
+        controller = null;
+        return true;
     }
 
     /** 前台服务注册截屏发布回调。 */

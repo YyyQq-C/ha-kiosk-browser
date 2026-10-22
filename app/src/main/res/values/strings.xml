@@ -28,6 +28,9 @@
     <string name="ha_token_hint">在 Home Assistant 的用户资料里创建长期访问令牌。这里只列出 Lovelace 仪表盘，点一项就设为首页。</string>
     <string name="dashboard_load">读取</string>
     <string name="dashboard_loading">正在读取…</string>
+    <string name="dashboard_forbidden">HA 已连接，但当前账号无权读取仪表盘</string>
+    <string name="dashboard_invalid_url">首页地址无效，请填写完整的 http:// 或 https:// 地址</string>
+    <string name="dashboard_bad_response">HA 返回了无法识别的仪表盘数据</string>
     <string name="dashboard_empty">没有读到仪表盘</string>
     <string name="dashboard_unauthorized">令牌无效，或首页地址不是这台 Home Assistant</string>
     <string name="dashboard_unreachable">连不上 Home Assistant</string>
@@ -167,7 +170,7 @@
     <string name="section_assist">语音助手</string>
     <string name="assist_switch">常驻唤醒（说 okay nabu，或点右下角麦克风）</string>
     <string name="wake_sensitivity">唤醒灵敏度（0 关闭，50 默认，100 最容易）</string>
-    <string name="assist_hint">需要先在「选择仪表盘」里保存长期访问令牌。唤醒词在本机检测，只有后面那一句会发给 Home Assistant。回答使用上面的媒体音量。灵敏度 0 只保留点按说话。</string>
+    <string name="assist_hint">需要先在「选择仪表盘」里保存长期访问令牌。唤醒词在本机检测，只有后面那一句会发给 Home Assistant。回答使用上面的媒体音量。灵敏度 0 只保留点按说话。唤醒后未说话默认 5 秒自动关闭，可在上方修改等待时间。</string>
     <string name="grant_mic">允许使用麦克风</string>
     <string name="help_assist">打开后，平板会一直听唤醒词 okay nabu。听到后点亮屏幕，把接下来那一句交给 Home Assistant 的语音助手。右下角麦克风也可以直接点按说话。\n\n麦克风只在打开这项并允许权限后使用。息屏时仍由前台服务采集。正在播放回答时暂停唤醒，避免平板听见自己的声音。\n\n灵敏度 0 到 100，默认 50。0 表示不听唤醒词，只能点按。拖动条松手后保存。\n\n开关和温度由 Home Assistant 里已经暴露的模拟设备执行，不会直接操作控客空调、地暖和新风。</string>
     <string name="assist_idle">说</string>
@@ -254,4 +257,11 @@
     <string name="footer_github">YyyQq-C/ha-kiosk-browser</string>
     <string name="footer_github_url">https://github.com/YyyQq-C/ha-kiosk-browser</string>
     <string name="toast_github_unavailable">无法打开 GitHub 页面</string>
+    <string name="toast_web_file_failed">无法打开或读取文件选择器，请稍后重试。</string>
+    <string name="assist_panel_listening">我在听，请说</string>
+    <string name="assist_panel_thinking">正在思考…</string>
+    <string name="assist_panel_speaking">正在回答</string>
+    <string name="assist_panel_hint">点击麦克风或右上角关闭，即可取消</string>
+    <string name="assist_panel_cancel">取消本轮语音</string>
+    <string name="speech_wait_seconds">等待说话超时（秒，1–120）</string>
 </resources>

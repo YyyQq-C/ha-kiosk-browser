@@ -232,3 +232,19 @@ Copyright (C) 2026 [YyyQq-C](https://github.com/YyyQq-C).
 Contact: yongqc.o@gmail.com
 
 If contributions from other people are accepted later, those contributors need to sign a contributor license agreement (CLA) before their code can also be included in the commercial license.
+
+## Web file uploads (1.0.3)
+
+WebView now opens Android's document picker for HTML file inputs, supports single or multiple selection, and completes cancellation callbacks. MIME filters normalize image extensions. Only selected `content://` results are returned; broad storage permissions are not added, and `file://` access stays disabled. File picking pauses automatic idle reload, watchdog and app sleep checks. In lock task mode, the app asks the user to disable locking first instead of silently doing nothing.
+
+## Voice and tablet interaction updates in v1.0.3
+
+- Adds a listening panel with cyan-to-violet waves driven by local microphone volume, plus thinking and speaking states.
+- Tap the microphone to start and tap again, or close the panel, to cancel. Stale network and playback callbacks cannot revive a cancelled session.
+- Long-press and drag the microphone to reposition it. The position survives app restarts. The icon shares the panel palette and hides during the screensaver, without disabling wake-word listening.
+- Adds a configurable wait-for-speech timeout, defaulting to 5 seconds (1–120 seconds). Once speech starts, the existing pause detection remains in use.
+- Uses the HA WebSocket dashboard-list command and distinguishes authentication, permission, URL and connection failures.
+- Retires superseded dashboard Activity instances so background timers cannot overwrite the active window brightness status.
+- Falls back to Android's device CPU interface when `/proc/stat` is inaccessible. The fallback requires device-owner privileges and vendor support; unavailable device CPU remains unknown.
+
+Validation: 99 unit tests and debug/release builds passed. Full Lint still reports 11 existing errors. Tap-to-cancel, the panel animation, timeout, icon dragging/restoration and screensaver visibility were checked on a Lenovo TB128FU. Wake-word recognition and a complete spoken conversation still need testing in the target environment. Release-signed APKs cannot overwrite an installation signed with the Android Debug certificate; do not uninstall or clear user data just to bypass this mismatch.

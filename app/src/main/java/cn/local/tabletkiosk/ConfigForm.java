@@ -36,6 +36,7 @@ public final class ConfigForm {
     public static final String SETTINGS_PIN = "settings_pin";
     public static final String WATCHDOG_SECONDS = "watchdog_seconds";
     public static final String WAKE_SENSITIVITY = "wake_sensitivity";
+    public static final String SPEECH_WAIT_SECONDS = "speech_wait_seconds";
 
     public static final int MIN_LAN_PASSWORD_LENGTH = 8;
     /** 校验失败时写入 errors 的稳定代码，界面按系统语言翻译。 */
@@ -195,6 +196,9 @@ public final class ConfigForm {
         b.assistEnabled = assistEnabled;
         if (!text.containsKey(WAKE_SENSITIVITY)) text.put(WAKE_SENSITIVITY, "50");
         b.wakeSensitivity = number(text, WAKE_SENSITIVITY, 0, 100, errors);
+        // 兼容旧设置文件：没有新增字段时使用默认 5 秒。
+        if (!text.containsKey(SPEECH_WAIT_SECONDS)) text.put(SPEECH_WAIT_SECONDS, "5");
+        b.speechWaitSeconds = number(text, SPEECH_WAIT_SECONDS, 1, 120, errors);
         return errors.isEmpty() ? new Result(b.build(), errors) : new Result(null, errors);
     }
 
@@ -244,6 +248,7 @@ public final class ConfigForm {
         m.put(SETTINGS_PIN, c.settingsPin);
         m.put(WATCHDOG_SECONDS, Integer.toString(c.watchdogSeconds));
         m.put(WAKE_SENSITIVITY, Integer.toString(c.wakeSensitivity));
+        m.put(SPEECH_WAIT_SECONDS, Integer.toString(c.speechWaitSeconds));
         return m;
     }
 

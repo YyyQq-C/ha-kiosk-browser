@@ -28,6 +28,9 @@
     <string name="ha_token_hint">Create a long-lived access token in your Home Assistant profile. This list contains only Lovelace dashboards. Tap one to set it as the home page.</string>
     <string name="dashboard_load">Load</string>
     <string name="dashboard_loading">Loading…</string>
+    <string name="dashboard_forbidden">Connected to HA, but this account cannot list dashboards</string>
+    <string name="dashboard_invalid_url">Enter a complete http:// or https:// home URL</string>
+    <string name="dashboard_bad_response">HA returned an unsupported dashboard response</string>
     <string name="dashboard_empty">No dashboards were found</string>
     <string name="dashboard_unauthorized">The token is invalid, or the home URL is not that Home Assistant</string>
     <string name="dashboard_unreachable">Cannot reach Home Assistant</string>
@@ -167,7 +170,7 @@
     <string name="section_assist">Voice</string>
     <string name="assist_switch">Always listen (say okay nabu, or tap the mic)</string>
     <string name="wake_sensitivity">Wake sensitivity (0 off, 50 default, 100 easiest)</string>
-    <string name="assist_hint">Save a long-lived access token in Choose dashboard first. The wake word stays on this tablet. Only the following sentence is sent to Home Assistant. Replies use the media volume above. Sensitivity 0 keeps tap-to-talk only.</string>
+    <string name="assist_hint">Save a long-lived access token in Choose dashboard first. The wake word stays on this tablet. Only the following sentence is sent to Home Assistant. Replies use the media volume above. Sensitivity 0 keeps tap-to-talk only. If no speech is detected, the panel closes after 5 seconds by default. Change the wait time above.</string>
     <string name="grant_mic">Allow the microphone</string>
     <string name="help_assist">When this is on, the tablet listens for okay nabu. A match turns the screen on and sends the next sentence to the Home Assistant voice assistant. The mic button at the lower right also starts a sentence.\n\nThe microphone is used only after this switch is on and permission is allowed. The foreground service keeps listening while the screen is off. Wake detection pauses while a reply is playing.\n\nSensitivity is 0 to 100, default 50. Zero disables the wake word and leaves tap-to-talk. The slider saves when released.\n\nSwitches and temperatures are handled by the simulated entities exposed in Home Assistant. Konke air conditioners, floor heating, and fresh air are not commanded directly.</string>
     <string name="assist_idle">Say</string>
@@ -250,4 +253,11 @@
     <string name="footer_license">GNU AGPL-3.0, with a separate commercial license. Use is free when you comply with the AGPL. Commercial distribution or a network service that does not publish its source under the AGPL requires a commercial license.</string>
     <string name="footer_contact"> Commercial license: %1$s</string>
     <string name="toast_github_unavailable">Could not open the GitHub page</string>
+    <string name="toast_web_file_failed">Could not open or read the file picker. Please try again.</string>
+    <string name="assist_panel_listening">Listening…</string>
+    <string name="assist_panel_thinking">Thinking…</string>
+    <string name="assist_panel_speaking">Speaking…</string>
+    <string name="assist_panel_hint">Tap the microphone or close to cancel</string>
+    <string name="assist_panel_cancel">Cancel voice session</string>
+    <string name="speech_wait_seconds">Wait for speech timeout (seconds, 1–120)</string>
 </resources>

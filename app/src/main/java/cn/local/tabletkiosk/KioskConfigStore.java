@@ -68,6 +68,7 @@ public final class KioskConfigStore {
         b.watchdogSeconds = prefs.getInt(ConfigForm.WATCHDOG_SECONDS, d.watchdogSeconds);
         b.assistEnabled = prefs.getBoolean("assist_enabled", d.assistEnabled);
         b.wakeSensitivity = prefs.getInt(ConfigForm.WAKE_SENSITIVITY, d.wakeSensitivity);
+        b.speechWaitSeconds = prefs.getInt(ConfigForm.SPEECH_WAIT_SECONDS, d.speechWaitSeconds);
         return b.build();
     }
 
@@ -115,6 +116,7 @@ public final class KioskConfigStore {
                 .putInt(ConfigForm.WATCHDOG_SECONDS, c.watchdogSeconds)
                 .putBoolean("assist_enabled", c.assistEnabled)
                 .putInt(ConfigForm.WAKE_SENSITIVITY, c.wakeSensitivity)
+                .putInt(ConfigForm.SPEECH_WAIT_SECONDS, c.speechWaitSeconds)
                 .commit();
         if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist kiosk config");
     }
@@ -141,6 +143,23 @@ public final class KioskConfigStore {
     /** 保存长期访问令牌。空字符串表示清除。 */
     public void saveHaToken(String token) {
         prefs.edit().putString(HA_TOKEN, token == null ? "" : token.trim()).commit();
+    }
+
+    /** 读取语音图标的横向位置比例，默认靠右。 */
+    public float assistButtonX() {
+        return FloatingPosition.fraction(prefs.getFloat("assist_button_x", 1f));
+    }
+
+    /** 读取语音图标的纵向位置比例，默认靠下。 */
+    public float assistButtonY() {
+        return FloatingPosition.fraction(prefs.getFloat("assist_button_y", 1f));
+    }
+
+    /** 松手时保存图标位置，不触发其他配置重载或 MQTT 重连。 */
+    public void saveAssistButtonPosition(float x, float y) {
+        boolean ok = prefs.edit().putFloat("assist_button_x", FloatingPosition.fraction(x))
+                .putFloat("assist_button_y", FloatingPosition.fraction(y)).commit();
+        if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist assist button position");
     }
 
     /** 还没有确认过首页时先进入设置。已经改成自己的地址则直接跳过，仍是占位地址则再确认一次。 */

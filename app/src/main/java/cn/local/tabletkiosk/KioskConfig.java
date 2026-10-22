@@ -52,6 +52,8 @@ public final class KioskConfig {
     public final int watchdogSeconds;
     public final boolean assistEnabled;
     public final int wakeSensitivity;
+    /** 唤醒后一直没有说话时自动取消，单位秒。 */
+    public final int speechWaitSeconds;
 
     /** 由构建器生成配置，空字符串统一转为非 null。 */
     private KioskConfig(Builder b) {
@@ -96,6 +98,7 @@ public final class KioskConfig {
         watchdogSeconds = b.watchdogSeconds;
         assistEnabled = b.assistEnabled;
         wakeSensitivity = b.wakeSensitivity;
+        speechWaitSeconds = b.speechWaitSeconds;
     }
 
     /** 返回首次启动使用的默认配置。 */
@@ -147,6 +150,7 @@ public final class KioskConfig {
         b.watchdogSeconds = watchdogSeconds;
         b.assistEnabled = assistEnabled;
         b.wakeSensitivity = wakeSensitivity;
+        b.speechWaitSeconds = speechWaitSeconds;
         return b;
     }
 
@@ -188,6 +192,7 @@ public final class KioskConfig {
                 && sleepEnabled == c.sleepEnabled && sleepStartHour == c.sleepStartHour
                 && sleepEndHour == c.sleepEndHour && volume == c.volume && watchdogSeconds == c.watchdogSeconds
                 && assistEnabled == c.assistEnabled && wakeSensitivity == c.wakeSensitivity
+                && speechWaitSeconds == c.speechWaitSeconds
                 && settingsPin.equals(c.settingsPin)
                 && homeUrl.equals(c.homeUrl) && sameMqttConnection(c) && sameLanServer(c);
     }
@@ -200,7 +205,7 @@ public final class KioskConfig {
                 mqttPort, mqttUsername, mqttBaseTopic, mqttDiscoveryPrefix, mqttStateIntervalSeconds, lanEnabled,
                 lanPort, lockTaskEnabled, scheduleEnabled, dayStartHour, nightStartHour, dayBrightness,
                 nightBrightness, dailyReloadEnabled, dailyReloadHour, dailyReloadMinute, sleepEnabled,
-                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds, assistEnabled, wakeSensitivity);
+                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds, assistEnabled, wakeSensitivity, speechWaitSeconds);
     }
 
     /** 可变构建器，字段初值即首次启动的默认值。 */
@@ -250,6 +255,7 @@ public final class KioskConfig {
         public int watchdogSeconds = 0;
         public boolean assistEnabled = false;
         public int wakeSensitivity = 50;
+        public int speechWaitSeconds = 5;
 
         /** 生成不可变配置。 */
         public KioskConfig build() {

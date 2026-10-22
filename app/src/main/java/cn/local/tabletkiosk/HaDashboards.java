@@ -1,13 +1,16 @@
 package cn.local.tabletkiosk;
 
 import android.util.Log;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -25,11 +28,12 @@ public final class HaDashboards {
         }
     }
 
-    /** 读取结果。error 为 unauthorized、unreachable 或 bad_response。 */
+    /** 读取结果，区分鉴权、权限、地址、网络及协议错误。 */
     public static final class Outcome {
         public final List<Item> items;
         public final String error;
 
+        /** 保存列表和可展示的错误类别。 */
         private Outcome(List<Item> items, String error) {
             this.items = items;
             this.error = error;
@@ -39,32 +43,78 @@ public final class HaDashboards {
     private HaDashboards() {
     }
 
-    /** 请求 /api/lovelace/dashboards。令牌不会写入日志。 */
+    /** 在后台等待 WebSocket 鉴权和仪表盘列表，始终释放连接。 */
     public static Outcome load(String homeUrl, String token) {
+        return load(homeUrl, token, new OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build());
+    }
+
+    /** 使用指定客户端读取列表，测试可复用本地 WebSocket 服务。 */
+    static Outcome load(String homeUrl, String token, OkHttpClient client) {
         String origin = originOf(homeUrl);
-        if (origin == null || token == null || token.trim().isEmpty()) {
-            return new Outcome(List.of(), "unauthorized");
-        }
-        HttpURLConnection connection = null;
-        try {
-            connection = (HttpURLConnection) URI.create(origin + "/api/lovelace/dashboards").toURL().openConnection();
-            connection.setConnectTimeout(8000);
-            connection.setReadTimeout(8000);
-            connection.setRequestProperty("Authorization", "Bearer " + token.trim());
-            connection.setRequestProperty("Accept", "application/json");
-            int status = connection.getResponseCode();
-            if (status == 401 || status == 403) return new Outcome(List.of(), "unauthorized");
-            if (status < 200 || status >= 300) {
-                Log.w(KioskApp.LOG, "Dashboard list HTTP status=" + status);
-                return new Outcome(List.of(), "bad_response");
+        if (origin == null) return new Outcome(List.of(), "invalid_url");
+        if (token == null || token.trim().isEmpty()) return new Outcome(List.of(), "unauthorized");
+        CompletableFuture<Outcome> result = new CompletableFuture<>();
+        String url = (origin.startsWith("https://") ? "wss://" : "ws://")
+                + origin.substring(origin.indexOf("://") + 3) + "/api/websocket";
+        WebSocket socket = client.newWebSocket(new Request.Builder().url(url).build(), new WebSocketListener() {
+            /** 先完成鉴权，再发送 HA 实际支持的仪表盘列表命令。 */
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                try {
+                    JSONObject message = new JSONObject(text);
+                    String type = message.optString("type");
+                    if ("auth_required".equals(type)) {
+                        webSocket.send(AssistProtocol.authMessage(token.trim()));
+                    } else if ("auth_invalid".equals(type)) {
+                        Log.w(KioskApp.LOG, "Dashboard websocket authentication rejected");
+                        result.complete(new Outcome(List.of(), "unauthorized"));
+                    } else if ("auth_ok".equals(type)) {
+                        webSocket.send("{\"id\":1,\"type\":\"lovelace/dashboards/list\"}");
+                    } else if ("result".equals(type) && message.optInt("id") == 1) {
+                        if (!message.optBoolean("success")) {
+                            JSONObject error = message.optJSONObject("error");
+                            String code = error == null ? "" : error.optString("code");
+                            Log.w(KioskApp.LOG, "Dashboard websocket command rejected");
+                            result.complete(new Outcome(List.of(), "unauthorized".equals(code) ? "forbidden" : "bad_response"));
+                        } else {
+                            JSONArray dashboards = message.getJSONArray("result");
+                            result.complete(new Outcome(parse(origin, dashboards.toString()), null));
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w(KioskApp.LOG, "Dashboard websocket response rejected", e);
+                    result.complete(new Outcome(List.of(), "bad_response"));
+                }
             }
-            String body = read(connection.getInputStream());
-            return new Outcome(parse(origin, body), null);
+
+            /** 网络和握手错误单独报告，不把它们误判成令牌错误。 */
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable error, Response response) {
+                Log.w(KioskApp.LOG, "Dashboard websocket connection failed", error);
+                result.complete(new Outcome(List.of(), "unreachable"));
+            }
+
+            /** 服务端提前关闭时结束等待。 */
+            @Override
+            public void onClosing(WebSocket webSocket, int code, String reason) {
+                webSocket.close(1000, null);
+                result.complete(new Outcome(List.of(), "unreachable"));
+            }
+        });
+        try {
+            return result.get(12, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(KioskApp.LOG, "Dashboard websocket wait interrupted", e);
+            return new Outcome(List.of(), "unreachable");
         } catch (Exception e) {
-            Log.w(KioskApp.LOG, "Dashboard list failed", e);
+            Log.w(KioskApp.LOG, "Dashboard websocket wait failed", e);
             return new Outcome(List.of(), "unreachable");
         } finally {
-            if (connection != null) connection.disconnect();
+            socket.cancel();
+            client.connectionPool().evictAll();
+            client.dispatcher().executorService().shutdown();
         }
     }
 
@@ -108,12 +158,4 @@ public final class HaDashboards {
         return items;
     }
 
-    /** 读完整响应。 */
-    private static String read(InputStream input) throws java.io.IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int count;
-        while ((count = input.read(buffer)) >= 0) out.write(buffer, 0, count);
-        return out.toString(StandardCharsets.UTF_8);
-    }
 }

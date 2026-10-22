@@ -12,6 +12,14 @@ public final class BrightnessSchedule {
                 ? config.dayBrightness : config.nightBrightness;
     }
 
+    /** 设置或密码页始终使用观看亮度，其他场景保留屏保及待机优先级。 */
+    static int currentBrightness(KioskConfig config, int hour, boolean watching,
+                                 boolean screensaver, boolean localUi) {
+        if (localUi) return watchingBrightness(config, hour);
+        if (screensaver) return config.screensaverBrightness;
+        return watching ? watchingBrightness(config, hour) : config.standbyBrightness;
+    }
+
     /** 判断这个小时是否落在白天。两个开始时刻相同时整天算白天。 */
     static boolean isDay(int dayStartHour, int nightStartHour, int hourOfDay) {
         int day = floorMod(dayStartHour, 24);
