@@ -250,12 +250,12 @@
     <string name="entity_temperature">电池温度</string>
 
     <string name="footer_title">HA 智能面板 · %1$s</string>
-    <string name="footer_copyright">Copyright © 2026 YyyQq-C</string>
+    <string name="footer_copyright" translatable="false">Copyright © 2026 YyyQq-C</string>
     <string name="footer_license">GNU AGPL-3.0，另有商业授权。遵守 AGPL 的使用免费；不按 AGPL 公开源码的商业发行或网络服务需要商业授权。</string>
     <string name="footer_contact">商业授权联系 %1$s</string>
-    <string name="footer_email">yongqc.o@gmail.com</string>
-    <string name="footer_github">YyyQq-C/ha-kiosk-browser</string>
-    <string name="footer_github_url">https://github.com/YyyQq-C/ha-kiosk-browser</string>
+    <string name="footer_email" translatable="false">yongqc.o@gmail.com</string>
+    <string name="footer_github" translatable="false">YyyQq-C/ha-kiosk-browser</string>
+    <string name="footer_github_url" translatable="false">https://github.com/YyyQq-C/ha-kiosk-browser</string>
     <string name="toast_github_unavailable">无法打开 GitHub 页面</string>
     <string name="toast_web_file_failed">无法打开或读取文件选择器，请稍后重试。</string>
     <string name="assist_panel_listening">我在听，请说</string>

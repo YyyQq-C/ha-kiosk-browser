@@ -1945,7 +1945,7 @@ final class SettingsPanel extends FrameLayout {
     private final class HourPicker extends NumberPicker {
         /** 建立 0 到 23 的滚轮，并锁住内部输入框。 */
         HourPicker(Context context) {
-            super(context);
+            super(new android.view.ContextThemeWrapper(context, R.style.ThemeOverlay_TabletKiosk_HourPicker));
             setMinValue(0);
             setMaxValue(23);
             setWrapSelectorWheel(true);
@@ -2022,27 +2022,9 @@ final class SettingsPanel extends FrameLayout {
             input.setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_NO);
         }
 
-        /** 把滚轮数字和分割线改成面板强调色。隐藏接口失败时保留系统颜色。 */
+        /** 使用 Android 10 起提供的公开接口设置滚轮数字颜色，分隔线由局部主题着色。 */
         private void tintWheel() {
-            try {
-                java.lang.reflect.Field paintField = NumberPicker.class.getDeclaredField("mSelectorWheelPaint");
-                paintField.setAccessible(true);
-                Paint paint = (Paint) paintField.get(this);
-                if (paint != null) {
-                    paint.setColor(ACCENT);
-                    paint.setTypeface(Typeface.DEFAULT_BOLD);
-                }
-            } catch (ReflectiveOperationException ex) {
-                Log.w(KioskApp.LOG, "Failed to tint hour picker text", ex);
-            }
-            try {
-                java.lang.reflect.Field dividerField = NumberPicker.class.getDeclaredField("mSelectionDivider");
-                dividerField.setAccessible(true);
-                dividerField.set(this, new ColorDrawable(ACCENT));
-            } catch (ReflectiveOperationException ex) {
-                Log.w(KioskApp.LOG, "Failed to tint hour picker divider", ex);
-            }
-            invalidate();
+            setTextColor(ACCENT);
         }
     }
 

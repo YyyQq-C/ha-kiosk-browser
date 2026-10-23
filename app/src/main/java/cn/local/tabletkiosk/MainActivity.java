@@ -1653,7 +1653,7 @@ public final class MainActivity extends ComponentActivity
         byte[] buffer = new byte[4096];
         int count;
         while ((count = input.read(buffer)) >= 0) out.write(buffer, 0, count);
-        return out.toString(StandardCharsets.UTF_8);
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     /** 在主线程应用导入结果，并刷新已经打开的设置。 */
@@ -1678,9 +1678,12 @@ public final class MainActivity extends ComponentActivity
     @Override
     public void requestWifiPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            wifiPermission.launch(new String[] {Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.ACCESS_FINE_LOCATION});
+            // Wi-Fi 名称仍需要精确定位，Android 12 起须同时申请近似定位。
+            wifiPermission.launch(new String[] {Manifest.permission.NEARBY_WIFI_DEVICES,
+                    Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION});
         } else {
-            wifiPermission.launch(new String[] {Manifest.permission.ACCESS_FINE_LOCATION});
+            wifiPermission.launch(new String[] {Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION});
         }
     }
 
@@ -1688,7 +1691,8 @@ public final class MainActivity extends ComponentActivity
     @Override
     public boolean wifiGranted() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED;
+            return checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }

@@ -10,7 +10,7 @@ Repository: [ha-kiosk-browser](https://github.com/YyyQq-C/ha-kiosk-browser)
 
 HAPanel is a full-screen Android web app that keeps a Home Assistant page on a tablet. The Chinese display name is HA 智能面板. The English display name is HAPanel.
 
-The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.2 and `versionCode` 38, as set in `app/build.gradle`. The first launch opens settings and does not load a page until the Home Assistant address is confirmed. Next to the home URL, the app can scan the LAN on port 8123 and fill the address from a result. The waiting page distinguishes no network, an address that is not open, and a certificate error, and it retries as soon as the network returns. Settings can check the latest GitHub release. The settings title is followed by how to open the panel again from the left edge. Day-to-day work is on `develop`. Public releases start at 1.0.0. The current release on `main` is 1.0.1.
+The minimum system is Android 11 (minSdk 30). The current source version is `versionName` 1.0.4 and `versionCode` 40, as set in `app/build.gradle`. The first launch opens settings and does not load a page until the Home Assistant address is confirmed. Next to the home URL, the app can scan the LAN on port 8123 and fill the address from a result. The waiting page distinguishes no network, an address that is not open, and a certificate error, and it retries as soon as the network returns. Settings can check the latest GitHub release. The settings title is followed by how to open the panel again from the left edge. Day-to-day work is on `develop`. Public releases start at 1.0.0. The current release on `main` is 1.0.4.
 
 ## Who it is for
 
@@ -248,3 +248,13 @@ WebView now opens Android's document picker for HTML file inputs, supports singl
 - Falls back to Android's device CPU interface when `/proc/stat` is inaccessible. The fallback requires device-owner privileges and vendor support; unavailable device CPU remains unknown.
 
 Validation: 99 unit tests and debug/release builds passed. Full Lint still reports 11 existing errors. Tap-to-cancel, the panel animation, timeout, icon dragging/restoration and screensaver visibility were checked on a Lenovo TB128FU. Wake-word recognition and a complete spoken conversation still need testing in the target environment. Release-signed APKs cannot overwrite an installation signed with the Android Debug certificate; do not uninstall or clear user data just to bypass this mismatch.
+
+## Compatibility fixes in v1.0.4
+
+- Replace four UTF-8 decoding calls that required Android 13 with an Android 11 compatible implementation.
+- Replace private NumberPicker field reflection with the public text color API and a local divider theme.
+- Declare and request coarse and fine location together; check fine location when reading Wi-Fi names on Android 13 and later.
+- Mark four fixed copyright, email, and repository strings as non-translatable.
+- Upgrade ONNX Runtime from 1.19.2 to 1.23.2 for 16 KB native library alignment.
+
+Validation: 99 unit tests passed, debug and release APK builds passed, and lintDebug passed with no errors. APK alignment and 64-bit ELF load segments were checked for 16 KB alignment. Runtime behavior on the tablet and on a device using 16 KB pages has not been verified for this update.

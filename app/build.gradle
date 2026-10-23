@@ -13,8 +13,8 @@ android {
         applicationId 'cn.local.tabletkiosk'
         minSdk 30
         targetSdk 36
-        versionCode 39
-        versionName '1.0.3'
+        versionCode 40
+        versionName '1.0.4'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -54,7 +54,8 @@ dependencies {
     implementation 'com.google.guava:listenablefuture:1.0'
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
+    // 新版原生库支持 16 KB 内存页，兼容采用该页大小的 Android 设备。
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
     testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'

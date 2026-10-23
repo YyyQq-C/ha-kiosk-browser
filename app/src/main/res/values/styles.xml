@@ -9,4 +9,8 @@
         <item name="android:statusBarColor">#000000</item>
         <item name="android:navigationBarColor">#000000</item>
     </style>
+    <!-- 仅给小时滚轮设置分隔线配色，使用公开主题属性兼容系统版本。 -->
+    <style name="ThemeOverlay.TabletKiosk.HourPicker" parent="">
+        <item name="android:colorControlNormal">#2F5D62</item>
+    </style>
 </resources>

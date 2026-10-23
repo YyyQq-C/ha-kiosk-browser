@@ -142,6 +142,6 @@ public final class HaDiscovery {
             out.write(buffer, 0, count);
             total += count;
         }
-        return out.toString(StandardCharsets.UTF_8);
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 }

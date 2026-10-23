@@ -198,6 +198,6 @@ final class HaWeather {
         byte[] buffer = new byte[4096];
         int count;
         while ((count = input.read(buffer)) >= 0) out.write(buffer, 0, count);
-        return out.toString(StandardCharsets.UTF_8);
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 }
