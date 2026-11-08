@@ -69,6 +69,7 @@ public final class KioskConfigStore {
         b.assistEnabled = prefs.getBoolean("assist_enabled", d.assistEnabled);
         b.wakeSensitivity = prefs.getInt(ConfigForm.WAKE_SENSITIVITY, d.wakeSensitivity);
         b.speechWaitSeconds = prefs.getInt(ConfigForm.SPEECH_WAIT_SECONDS, d.speechWaitSeconds);
+        b.externalApps = ExternalApps.parse(prefs.getString(ConfigForm.EXTERNAL_APPS, ""));
         return b.build();
     }
 
@@ -117,6 +118,7 @@ public final class KioskConfigStore {
                 .putBoolean("assist_enabled", c.assistEnabled)
                 .putInt(ConfigForm.WAKE_SENSITIVITY, c.wakeSensitivity)
                 .putInt(ConfigForm.SPEECH_WAIT_SECONDS, c.speechWaitSeconds)
+                .putString(ConfigForm.EXTERNAL_APPS, ExternalApps.join(c.externalApps))
                 .commit();
         if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist kiosk config");
     }
@@ -153,6 +155,23 @@ public final class KioskConfigStore {
     /** 读取语音图标的纵向位置比例，默认靠下。 */
     public float assistButtonY() {
         return FloatingPosition.fraction(prefs.getFloat("assist_button_y", 1f));
+    }
+
+    /** 读取返回面板按钮的横向位置比例，默认靠右。 */
+    public float returnButtonX() {
+        return FloatingPosition.fraction(prefs.getFloat("return_button_x", 1f));
+    }
+
+    /** 读取返回面板按钮的纵向位置比例，默认在中间。 */
+    public float returnButtonY() {
+        return FloatingPosition.fraction(prefs.getFloat("return_button_y", 0.5f));
+    }
+
+    /** 松手时保存返回按钮位置，不触发配置重载。 */
+    public void saveReturnButtonPosition(float x, float y) {
+        boolean ok = prefs.edit().putFloat("return_button_x", FloatingPosition.fraction(x))
+                .putFloat("return_button_y", FloatingPosition.fraction(y)).commit();
+        if (!ok) android.util.Log.e(KioskApp.LOG, "Failed to persist return button position");
     }
 
     /** 松手时保存图标位置，不触发其他配置重载或 MQTT 重连。 */

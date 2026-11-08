@@ -6,7 +6,7 @@ final class MqttCommands {
     enum Type {
         NONE, RELOAD, WAKE, REBOOT, BRIGHTNESS, HA_ONLINE, URL, HOME, MOTION, STANDBY_BRIGHTNESS,
         DIM_DELAY, LOCK, SCREEN_OFF, SCREENSHOT, NOTIFY, TTS, SCHEDULE, DAY_BRIGHTNESS, NIGHT_BRIGHTNESS,
-        VOLUME, PLAY, DAILY, DAILY_HOUR, DAILY_MINUTE, SLEEP, SLEEP_START, SLEEP_END, WATCHDOG
+        VOLUME, PLAY, DAILY, DAILY_HOUR, DAILY_MINUTE, SLEEP, SLEEP_START, SLEEP_END, WATCHDOG, APP, PANEL
     }
 
     /** 一条解析后的命令。开关用 value 1 或 0，文本命令带 text。 */
@@ -69,6 +69,8 @@ final class MqttCommands {
         if (topic.equals(topics.command(MqttTopics.CMD_SLEEP_START))) return range(Type.SLEEP_START, body, 0, 23);
         if (topic.equals(topics.command(MqttTopics.CMD_SLEEP_END))) return range(Type.SLEEP_END, body, 0, 23);
         if (topic.equals(topics.command(MqttTopics.CMD_WATCHDOG))) return range(Type.WATCHDOG, body, 0, 3600);
+        if (topic.equals(topics.command(MqttTopics.CMD_APP))) return app(body);
+        if (topic.equals(topics.command(MqttTopics.CMD_PANEL))) return command(Type.PANEL);
         return NONE;
     }
 
@@ -110,6 +112,11 @@ final class MqttCommands {
             return NONE;
         }
         return new Command(type, 0, body);
+    }
+
+    /** 外部应用包名，不是合法包名时丢弃。 */
+    private static Command app(String body) {
+        return ExternalApps.validPackage(body) ? new Command(Type.APP, 0, body) : NONE;
     }
 
     /** 通知或语音文本，空内容和过长内容丢弃。 */

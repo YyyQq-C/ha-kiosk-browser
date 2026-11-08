@@ -76,6 +76,23 @@ public class SettingsFileTest {
         assertEquals(8, document.config.screensaverBrightness);
     }
 
+    /** 外部应用列表随设置文件导出，旧文件没有这一项时为空。 */
+    @Test
+    public void roundTripKeepsExternalApps() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.externalApps = java.util.Arrays.asList("com.spotify.music", "org.videolan.vlc");
+        String json = SettingsFile.toJson(builder.build(), "zh", "");
+        SettingsFile.Document document = SettingsFile.fromJson(json);
+        assertNull(document.error);
+        assertEquals(java.util.Arrays.asList("com.spotify.music", "org.videolan.vlc"), document.config.externalApps);
+
+        String old = json.replaceAll(",?\"external_apps\":\"[^\"]*\"", "");
+        assertFalse(old.contains("external_apps"));
+        SettingsFile.Document oldDocument = SettingsFile.fromJson(old);
+        assertNull(oldDocument.error);
+        assertTrue(oldDocument.config.externalApps.isEmpty());
+    }
+
     /** 不是本应用写出的文件时拒绝。 */
     @Test
     public void rejectsUnknownFile() {

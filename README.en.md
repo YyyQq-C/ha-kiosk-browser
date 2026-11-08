@@ -22,6 +22,7 @@ Development was checked against a Lenovo Xiaoxin Pad 2022 (TB128FU, Android 12).
 
 - Full-screen WebView, with the status bar and navigation bar hidden and the screen kept on. The first launch opens the placeholder `http://homeassistant.local:8123/`. Change it to your Home Assistant address in settings.
 - Swipe right from the left screen edge to open settings. The gesture must start within 24dp of the left edge, move at least 80dp to the right, and move farther horizontally than vertically. Tap outside the panel or swipe left to close it. A tap on the edge is passed through to the page.
+- External apps: under External apps in settings, add other apps installed on the tablet, such as Spotify, to the right-side app bar (at most 12). Swipe left from the right screen edge to open the app bar (same gesture rules as the left edge, no settings PIN), then tap an icon. The dashboard stays in the background, and its timers, MQTT, and the LAN API keep working. While you are away, a round button with this app icon floats above other apps. Tap it to come back, or drag it out of the way; the position is remembered. The return button needs the Display over other apps permission; without it, use Home or recents. Until an app is added, the right edge stays with the page. Other apps cannot open while lock task is on. Waking the screen after the night screen-off returns to the dashboard; music keeps playing in the background.
 - Idle reload clears the page cache and reloads the page after the configured number of hours without a touch. Login cookies and localStorage are kept.
 - A failed load retries after the configured number of seconds. A crashed web renderer is recreated.
 - Watch brightness and standby brightness are separate and apply only to this app window. The system brightness is not changed. Day and night watch levels can follow the hour in the device local time zone. When standby brightness starts, a screensaver covers the page with the time, date, lunar date, and the weather already in Home Assistant. A tap only leaves the screensaver. During the night screen-off window, the screen turns off when nobody is present and settings are closed. It turns back on after that window. Screen off requires device owner.
@@ -174,6 +175,8 @@ Switches accept `ON` / `OFF` / `true` / `false` / `1` / `0`. A button runs when 
 | On-screen notice | text | `notify` | `notify`; at most 200 characters |
 | Speak | text | `tts` | `tts`; at most 200 characters |
 | Play audio | text | `play` | `play`; `http://` or `https://`, at most 2000 characters |
+| Open app | text | `app_command` | `app`; an Android package name such as `com.spotify.music`, at most 255 characters. Package names are shown under External apps in settings; the app does not have to be in the app bar |
+| Show dashboard | button | `panel` | `panel`; brings the dashboard to the front while the other app keeps running |
 
 ## LAN
 
@@ -216,6 +219,8 @@ curl -X POST -H "Authorization: Bearer YOUR_PASSWORD" http://TABLET_IP:2323/rebo
 | `/sleep-start` | POST | 0–23 |
 | `/sleep-end` | POST | 0–23 |
 | `/watchdog` | POST | 0–3600 |
+| `/app` | POST | Open an external app. The body or `?value=` is an Android package name such as `com.spotify.music`. Returns 400 for a malformed name, 404 when it is not installed, and 409 while lock task is on |
+| `/panel` | POST | Bring the dashboard to the front |
 | `/reboot` | POST | Reboot after the response is sent. Returns 409 without device owner |
 
 Integers and text can use the `value` query parameter when the body is empty. A wrong password returns 401. A non-LAN source returns 403. An unknown path returns 404. The wrong method returns 405. A bad value returns 400. The API is plain HTTP and should be enabled only on a trusted home LAN.

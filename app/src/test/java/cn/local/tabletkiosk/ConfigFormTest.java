@@ -40,6 +40,41 @@ public class ConfigFormTest {
         assertEquals(c, r.config);
     }
 
+    /** 外部应用列表转成文字后能读回；非法包名被丢掉，不算校验错误。 */
+    @Test
+    public void externalAppsRoundTrip() {
+        KioskConfig.Builder builder = KioskConfig.defaults().toBuilder();
+        builder.externalApps = java.util.Arrays.asList("com.spotify.music", "org.videolan.vlc");
+        KioskConfig c = builder.build();
+        Map<String, String> t = ConfigForm.toText(c);
+        assertEquals("com.spotify.music,org.videolan.vlc", t.get(ConfigForm.EXTERNAL_APPS));
+        ConfigForm.Result r = ConfigForm.parse(t, c.motionEnabled, false, false, c.lockTaskEnabled);
+        assertTrue(r.errors.toString(), r.ok());
+        assertEquals(c, r.config);
+
+        t.put(ConfigForm.EXTERNAL_APPS, "com.spotify.music,not valid");
+        r = ConfigForm.parse(t, c.motionEnabled, false, false, c.lockTaskEnabled);
+        assertTrue(r.errors.toString(), r.ok());
+        assertEquals(java.util.Collections.singletonList("com.spotify.music"), r.config.externalApps);
+
+        t.remove(ConfigForm.EXTERNAL_APPS);
+        r = ConfigForm.parse(t, c.motionEnabled, false, false, c.lockTaskEnabled);
+        assertTrue(r.config.externalApps.isEmpty());
+    }
+
+    /** 外部应用列表参与配置相等比较，改动时才会保存并通知。 */
+    @Test
+    public void externalAppsAffectEquality() {
+        KioskConfig plain = KioskConfig.defaults();
+        KioskConfig.Builder builder = plain.toBuilder();
+        builder.externalApps = java.util.Collections.singletonList("com.spotify.music");
+        KioskConfig withApp = builder.build();
+        assertFalse(plain.equals(withApp));
+        assertEquals(withApp, withApp.toBuilder().build());
+        assertEquals(withApp.hashCode(), withApp.toBuilder().build().hashCode());
+        assertTrue(plain.externalApps.isEmpty());
+    }
+
     /** 0 表示关闭，属于合法值。 */
     @Test
     public void zeroDisablesFeatures() {

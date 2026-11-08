@@ -71,6 +71,8 @@ final class MqttDiscovery {
         final String storage;
         final String appMemory;
         final String temperature;
+        final String openApp;
+        final String showPanel;
 
         /** 保存全部实体名称。 */
         Labels(String screenOn, String presence, String battery, String charging, String chargeState,
@@ -81,7 +83,7 @@ final class MqttDiscovery {
                String model, String androidVersion, String volume, String play, String dailyReload,
                String dailyHour, String dailyMinute, String sleep, String sleepStart, String sleepEnd,
                String watchdog, String wifiSsid, String wifiSignal, String cpu, String memory, String memoryLow,
-               String storage, String appMemory, String temperature) {
+               String storage, String appMemory, String temperature, String openApp, String showPanel) {
             this.screenOn = screenOn;
             this.presence = presence;
             this.battery = battery;
@@ -128,6 +130,8 @@ final class MqttDiscovery {
             this.storage = storage;
             this.appMemory = appMemory;
             this.temperature = temperature;
+            this.openApp = openApp;
+            this.showPanel = showPanel;
         }
     }
 
@@ -284,6 +288,17 @@ final class MqttDiscovery {
                 .put("mode", "text")
                 .put("max", 2000)
                 .put("icon", "mdi:web")
+                .toMessage());
+        out.add(entity(t, d, device, "text", "app_command", names.openApp)
+                .put("command_topic", t.command(MqttTopics.CMD_APP))
+                .put("mode", "text")
+                .put("max", 255)
+                .put("icon", "mdi:application-export")
+                .toMessage());
+        out.add(entity(t, d, device, "button", "panel", names.showPanel)
+                .put("command_topic", t.command(MqttTopics.CMD_PANEL))
+                .put("payload_press", "PRESS")
+                .put("icon", "mdi:tablet-dashboard")
                 .toMessage());
         out.add(entity(t, d, device, "button", "screenshot", names.screenshot)
                 .put("command_topic", t.command(MqttTopics.CMD_SCREENSHOT))

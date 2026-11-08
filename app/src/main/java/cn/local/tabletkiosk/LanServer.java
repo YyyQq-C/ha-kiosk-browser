@@ -217,6 +217,24 @@ final class LanServer {
                 return numberRoute(req, 0, 23, hub::requestSleepEnd, "sleep_end");
             case "/watchdog":
                 return numberRoute(req, 0, 3600, hub::requestWatchdog, "watchdog");
+            case "/app":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                String pkg = textBody(req);
+                if (!ExternalApps.validPackage(pkg)) {
+                    return new Reply(400, "{\"ok\":false,\"error\":\"expected an Android package name\"}", null);
+                }
+                if (!hub.appLaunchable(pkg)) {
+                    return new Reply(404, "{\"ok\":false,\"error\":\"app not installed\"}", null);
+                }
+                if (hub.status().lockTask) {
+                    return new Reply(409, "{\"ok\":false,\"error\":\"lock task is on\"}", null);
+                }
+                hub.requestLaunchApp(pkg);
+                return new Reply(200, OK, null);
+            case "/panel":
+                if (!"POST".equals(req.method)) return methodNotAllowed();
+                hub.requestShowPanel();
+                return new Reply(200, OK, null);
             case "/reboot":
                 if (!"POST".equals(req.method)) return methodNotAllowed();
                 if (!hub.status().deviceOwner) {
