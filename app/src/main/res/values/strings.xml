@@ -264,4 +264,26 @@
     <string name="assist_panel_hint">点击麦克风或右上角关闭，即可取消</string>
     <string name="assist_panel_cancel">取消本轮语音</string>
     <string name="speech_wait_seconds">等待说话超时（秒，1–120）</string>
+    <!-- 外部应用：右侧应用栏、返回按钮和远程打开 -->
+    <string name="section_apps">外部应用</string>
+    <string name="help_apps">把平板上装的其他应用放进右侧应用栏，例如 Spotify。这样音乐由平板自己播放，可以从平板连接的蓝牙音箱出声。\n\n从屏幕最右侧向左滑出应用栏，点图标打开。面板留在后台，计时、MQTT 和局域网接口照常工作。没有添加应用时，右边缘手势仍交给网页。\n\n离开面板后，屏幕上会浮着一个圆形的本应用图标，点它回到面板，拖动可以挪开。这个返回按钮需要“显示在其他应用上层”权限；没有允许时，按 Home 或多任务键回来。\n\n锁定模式打开时，系统不让打开其他应用，需要先关闭锁定模式。夜间熄屏后被唤醒会回到面板，后台的音乐继续播放。\n\nHome Assistant 也能远程操作：向 MQTT 命令主题 app 或局域网 POST /app 发送下面列出的包名，就会打开对应应用；按钮 panel 或 POST /panel 回到面板。</string>
+    <string name="apps_hint">加进来的应用会出现在右侧应用栏：从屏幕最右侧向左滑出，点图标打开。离开面板后，点悬浮的圆形按钮回来。</string>
+    <string name="apps_none">还没有添加应用。添加之前，右边缘手势仍交给网页。</string>
+    <string name="apps_add">添加应用</string>
+    <string name="apps_remove">移除</string>
+    <string name="apps_missing">未安装</string>
+    <string name="apps_allow_return">允许显示返回按钮</string>
+    <string name="apps_full">应用栏最多放 %d 个应用</string>
+    <string name="apps_pick_title">添加到应用栏</string>
+    <string name="apps_pick_loading">正在读取已安装的应用…</string>
+    <string name="apps_pick_hint">点一个应用，把它加到应用栏末尾。</string>
+    <string name="apps_pick_empty">没有可以添加的应用了。</string>
+    <string name="apps_title">应用</string>
+    <string name="apps_drawer_hint">点图标打开。离开后点悬浮的圆形按钮回到面板。在设置的“外部应用”里添加或移除。</string>
+    <string name="apps_drawer_empty">列表里的应用都已卸载，请到设置的“外部应用”里移除。</string>
+    <string name="return_to_panel">回到面板</string>
+    <string name="toast_lock_task_app">锁定模式下不能打开其他应用，请先关闭锁定模式</string>
+    <string name="toast_app_unavailable">无法打开这个应用，它可能已被卸载</string>
+    <string name="entity_open_app">打开应用</string>
+    <string name="entity_show_panel">回到面板</string>
 </resources>

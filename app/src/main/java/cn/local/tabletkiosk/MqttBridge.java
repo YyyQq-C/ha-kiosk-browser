@@ -287,7 +287,9 @@ final class MqttBridge {
                 text.getString(R.string.entity_memory_low),
                 text.getString(R.string.entity_storage),
                 text.getString(R.string.entity_app_memory),
-                text.getString(R.string.entity_temperature));
+                text.getString(R.string.entity_temperature),
+                text.getString(R.string.entity_open_app),
+                text.getString(R.string.entity_show_panel));
     }
 
     /** 发布截屏 JPEG，保留最后一张给 Home Assistant 摄像头实体。 */
@@ -464,6 +466,14 @@ final class MqttBridge {
                 case WATCHDOG:
                     Log.i(KioskApp.LOG, "MQTT command: watchdog=" + cmd.value);
                     hub.requestWatchdog(cmd.value);
+                    break;
+                case APP:
+                    Log.i(KioskApp.LOG, "MQTT command: open app " + cmd.text);
+                    hub.requestLaunchApp(cmd.text);
+                    break;
+                case PANEL:
+                    Log.i(KioskApp.LOG, "MQTT command: show panel");
+                    hub.requestShowPanel();
                     break;
                 case HA_ONLINE:
                     Log.i(KioskApp.LOG, "Home Assistant came online, republishing discovery");

@@ -260,4 +260,26 @@
     <string name="assist_panel_hint">Tap the microphone or close to cancel</string>
     <string name="assist_panel_cancel">Cancel voice session</string>
     <string name="speech_wait_seconds">Wait for speech timeout (seconds, 1–120)</string>
+    <!-- External apps: right-side app bar, return button, and remote open -->
+    <string name="section_apps">External apps</string>
+    <string name="help_apps">Put other apps installed on the tablet, such as Spotify, in the right-side app bar. Music then plays on the tablet itself, so it can come out of a Bluetooth speaker paired with the tablet.\n\nSwipe left from the right edge of the screen to open the app bar, then tap an icon. The dashboard stays in the background, and its timers, MQTT, and the LAN API keep working. Until an app is added, the right edge stays with the page.\n\nWhile you are in another app, a round button with this app icon floats on the screen. Tap it to come back to the dashboard, or drag it out of the way. The return button needs the Display over other apps permission. Without it, use Home or recents to come back.\n\nWhile lock task is on, Android does not let other apps open. Turn lock task off first. After the night screen-off, waking the screen returns to the dashboard and music keeps playing in the background.\n\nHome Assistant can do this remotely too. Send a package name listed below to the MQTT command topic app, or POST it to /app on the LAN API, to open that app. The panel button or POST /panel brings the dashboard back.</string>
+    <string name="apps_hint">Apps added here appear in the right-side app bar. Swipe left from the right edge of the screen, then tap an icon. While you are away, tap the round floating button to come back.</string>
+    <string name="apps_none">No apps yet. Until one is added, the right edge stays with the page.</string>
+    <string name="apps_add">Add app</string>
+    <string name="apps_remove">Remove</string>
+    <string name="apps_missing">Not installed</string>
+    <string name="apps_allow_return">Allow the return button</string>
+    <string name="apps_full">The app bar is full. Maximum: %d</string>
+    <string name="apps_pick_title">Add to the app bar</string>
+    <string name="apps_pick_loading">Reading installed apps…</string>
+    <string name="apps_pick_hint">Tap an app to add it to the end of the app bar.</string>
+    <string name="apps_pick_empty">There are no more apps to add.</string>
+    <string name="apps_title">Apps</string>
+    <string name="apps_drawer_hint">Tap an icon to open it. While you are away, tap the round floating button to come back. Add or remove apps under External apps in settings.</string>
+    <string name="apps_drawer_empty">The apps in the list are no longer installed. Remove them under External apps in settings.</string>
+    <string name="return_to_panel">Back to dashboard</string>
+    <string name="toast_lock_task_app">Lock task is on. Turn it off before opening other apps.</string>
+    <string name="toast_app_unavailable">Could not open this app. It may have been uninstalled.</string>
+    <string name="entity_open_app">Open app</string>
+    <string name="entity_show_panel">Show dashboard</string>
 </resources>

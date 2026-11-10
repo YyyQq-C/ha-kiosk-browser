@@ -28,6 +28,8 @@ final class MqttTopics {
     static final String CMD_SLEEP_START = "sleep_start";
     static final String CMD_SLEEP_END = "sleep_end";
     static final String CMD_WATCHDOG = "watchdog";
+    static final String CMD_APP = "app";
+    static final String CMD_PANEL = "panel";
 
     final String deviceId;
     private final String base;

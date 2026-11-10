@@ -76,9 +76,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-/** 全屏显示 HA 页面：空闲刷新、失败重试、观看与待机亮度、摄像头亮屏和左边缘设置。 */
+/** 全屏显示 HA 页面：空闲刷新、失败重试、观看与待机亮度、摄像头亮屏、左边缘设置和右边缘应用栏。 */
 public final class MainActivity extends ComponentActivity
-        implements KioskHub.Controller, EdgeSwipeLayout.Listener, SettingsPanel.Host, CameraMotion.Listener {
+        implements KioskHub.Controller, EdgeSwipeLayout.Listener, SettingsPanel.Host, CameraMotion.Listener,
+        AppDrawer.Host {
     private static final long TICK_MS = 1000;
     /** 窗口亮度刚改完的这段时间里，前置摄像头会看见自己造成的明暗变化，不能当成有人。 */
     private static final long BRIGHTNESS_SETTLE_MS = 2500;
@@ -194,6 +195,9 @@ public final class MainActivity extends ComponentActivity
     private PowerManager power;
     private EdgeSwipeLayout edge;
     private SettingsPanel settings;
+    private AppDrawer apps;
+    /** 从面板打开了外部应用，还没回来。离开前台时据此显示返回按钮。 */
+    private boolean awayInApp;
     private TopPullRefreshLayout refresh;
     private WebView web;
     private TextView notice;
@@ -272,6 +276,11 @@ public final class MainActivity extends ComponentActivity
                 FrameLayout.LayoutParams.MATCH_PARENT));
         notice = buildNotice(root);
         buildOffline(root);
+        // 应用栏盖在等待页上面，断网时也能打开不依赖面板的应用
+        apps = new AppDrawer(this, this);
+        root.addView(apps, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        edge.setRightEdgeEnabled(!config.externalApps.isEmpty());
         pinGate = buildPinGate(root);
         buildAssist(root);
         screenSaver = new ScreenSaver(this, this::onScreenSaverDismiss);
@@ -321,6 +330,7 @@ public final class MainActivity extends ComponentActivity
             @Override
             public void handleOnBackPressed() {
                 if (pinGate != null && pinGate.getVisibility() == View.VISIBLE) hidePinGate();
+                else if (appsOpen()) apps.hide();
                 else if (settings.isSetup()) return;
                 else if (settings.isOpen()) settings.hide();
                 else if (web.canGoBack()) web.goBack();
@@ -373,11 +383,17 @@ public final class MainActivity extends ComponentActivity
         applyVolume();
     }
 
-    /** 开始计时并按需打开摄像头。 */
+    /** 开始计时并按需打开摄像头。从外部应用回来时收起返回按钮，并当作有人在看。 */
     @Override
     protected void onStart() {
         super.onStart();
         started = true;
+        hub.returnBubble().hide();
+        if (awayInApp) {
+            awayInApp = false;
+            Log.i(KioskApp.LOG, "Dashboard back in front after external app");
+            onUserTouch();
+        }
         handler.removeCallbacks(tick);
         handler.post(tick);
         updateInteractive();
@@ -398,6 +414,8 @@ public final class MainActivity extends ComponentActivity
     @Override
     protected void onStop() {
         started = false;
+        // 只有从面板打开了外部应用才显示返回按钮；息屏、系统设置页等不显示
+        if (awayInApp && hub.isController(this)) hub.returnBubble().show();
         CookieManager.getInstance().flush();
         unwatchNetwork();
         super.onStop();
@@ -587,7 +605,7 @@ public final class MainActivity extends ComponentActivity
     /** 设置或密码层打开时不响应下拉。 */
     private void syncPullRefresh() {
         if (refresh == null) return;
-        boolean blocked = (settings != null && settings.isOpen()) || !pinClosed();
+        boolean blocked = (settings != null && settings.isOpen()) || !pinClosed() || appsOpen();
         refresh.setEnabled(!blocked);
         if (blocked) refresh.setRefreshing(false);
     }
@@ -719,7 +737,7 @@ public final class MainActivity extends ComponentActivity
         }
         Calendar calendar = Calendar.getInstance();
         // 设置和密码页不在边缘手势下面，触摸到不了 onUserTouch。人就在看面板，不能让观看计时在这里走完。
-        boolean panelOpen = settings != null && (settings.isOpen() || settings.isSetup());
+        boolean panelOpen = settings != null && (settings.isOpen() || settings.isSetup()) || appsOpen();
         if (panelOpen || !pinClosed()) presence.onActivity(now);
         presence.tick(now);
         applyBrightness();
@@ -746,7 +764,7 @@ public final class MainActivity extends ComponentActivity
     private void applyBrightness() {
         if (!hub.isController(this)) return;
         // 所有调用入口都保护本地操作，不依赖下一次定时器才能恢复观看亮度。
-        boolean localUi = settings != null && (settings.isOpen() || settings.isSetup() || !pinClosed());
+        boolean localUi = settings != null && (settings.isOpen() || settings.isSetup() || !pinClosed()) || appsOpen();
         if (localUi) presence.onActivity(SystemClock.elapsedRealtime());
         boolean watching = assistHold || localUi || presence.watching();
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
@@ -836,6 +854,8 @@ public final class MainActivity extends ComponentActivity
         syncCamera();
         syncLockTask();
         syncScreenSaver();
+        edge.setRightEdgeEnabled(!next.externalApps.isEmpty());
+        if (apps != null) apps.refresh(next.externalApps);
     }
 
     /** 按配置和权限打开或关闭摄像头检测。 */
@@ -883,7 +903,8 @@ public final class MainActivity extends ComponentActivity
      */
     private boolean shouldShowScreenSaver() {
         return started && config != null && config.screensaverEnabled && presence != null && !presence.watching()
-                && !assistHold && settings != null && !settings.isOpen() && !settings.isSetup() && pinClosed();
+                && !assistHold && settings != null && !settings.isOpen() && !settings.isSetup() && pinClosed()
+                && !appsOpen();
     }
 
     /** 无人且启用屏保时盖上覆盖层；有人、设置或语音期间收起。点按仍只关闭屏保。 */
@@ -935,6 +956,58 @@ public final class MainActivity extends ComponentActivity
         applyBrightness();
         syncScreenSaver();
         syncPullRefresh();
+    }
+
+    /** 右边缘滑出应用栏。只有设置里加了外部应用才会走到这里，不需要设置密码。 */
+    @Override
+    public void onOpenApps() {
+        if (apps == null || config.externalApps.isEmpty()) return;
+        edge.setEdgeEnabled(false);
+        apps.show(config.externalApps);
+        applyBrightness();
+        syncScreenSaver();
+        syncPullRefresh();
+    }
+
+    /** 应用栏里点了一个应用。 */
+    @Override
+    public void onAppChosen(String packageName) {
+        launchApp(packageName);
+    }
+
+    /** 应用栏收起后恢复边缘手势和全屏。 */
+    @Override
+    public void onAppDrawerClosed() {
+        if ((settings == null || !settings.isOpen()) && pinClosed()) edge.setEdgeEnabled(true);
+        syncPullRefresh();
+        hideSystemBars();
+        applyBrightness();
+        syncScreenSaver();
+    }
+
+    /** 应用栏是否打开。 */
+    private boolean appsOpen() {
+        return apps != null && apps.isOpen();
+    }
+
+    /**
+     * 打开外部应用，面板留在后台继续计时和上报。锁定模式下系统不让打开，先提示关闭锁定。
+     * 离开前台后显示返回按钮；已经在后台时（例如远程命令）立即显示。
+     */
+    @Override
+    public void launchApp(String packageName) {
+        if (DeviceOwnerPolicy.inLockTask(this)) {
+            Log.w(KioskApp.LOG, "External app blocked by lock task mode: " + packageName);
+            Toast.makeText(this, R.string.toast_lock_task_app, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (apps != null) apps.hideNow();
+        if (!AppLauncher.launch(this, packageName)) {
+            Toast.makeText(this, R.string.toast_app_unavailable, Toast.LENGTH_LONG).show();
+            return;
+        }
+        awayInApp = true;
+        if (!started) hub.returnBubble().show();
     }
 
     /** 摄像头检测到画面变化：标记有人；屏幕已熄时点亮。刚改完亮度的帧不当成有人。 */

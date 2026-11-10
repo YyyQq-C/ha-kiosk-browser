@@ -42,6 +42,9 @@ public final class KioskHub {
 
         /** 播放一个 http 或 https 音频地址。 */
         void playAudio(String url);
+
+        /** 打开一个已安装的外部应用；面板留在后台，返回按钮负责回来。 */
+        void launchApp(String packageName);
     }
 
     private static volatile KioskHub instance;
@@ -61,6 +64,7 @@ public final class KioskHub {
     private volatile boolean reopenSettings;
     private Controller controller;
     private java.util.function.Consumer<byte[]> imageSink;
+    private ReturnBubble returnBubble;
 
     /** 读取已保存配置并记录设备所有者状态。 */
     private KioskHub(Context context) {
@@ -389,6 +393,33 @@ public final class KioskHub {
     /** 设置页面无响应后重载的秒数，0 为关闭。 */
     public void requestWatchdog(int seconds) {
         patchConfig(b -> b.watchdogSeconds = clamp(seconds, 0, 3600));
+    }
+
+    /** 打开外部应用。主界面还在时交给它检查锁定模式；主界面已销毁时直接打开并显示返回按钮。 */
+    public void requestLaunchApp(String packageName) {
+        runOnMain(() -> {
+            if (controller != null) {
+                controller.launchApp(packageName);
+            } else if (AppLauncher.launch(app, packageName)) {
+                returnBubble().show();
+            }
+        });
+    }
+
+    /** 把面板切回前台。外部应用继续在后台运行。 */
+    public void requestShowPanel() {
+        runOnMain(() -> AppLauncher.showPanel(app));
+    }
+
+    /** 这个包名能否从桌面打开。供局域网接口先给出明确错误。 */
+    public boolean appLaunchable(String packageName) {
+        return AppLauncher.launchIntent(app, packageName) != null;
+    }
+
+    /** 离开面板后悬浮在其他应用上的返回按钮，只在主线程使用。 */
+    public ReturnBubble returnBubble() {
+        if (returnBubble == null) returnBubble = new ReturnBubble(app, store);
+        return returnBubble;
     }
 
     /** 修改配置中的一项；没有变化时不保存、不通知。 */

@@ -40,6 +40,7 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
 import android.widget.ScrollView;
@@ -165,6 +166,10 @@ final class SettingsPanel extends FrameLayout {
     private Button batteryButton;
     private Button overlayButton;
     private Button wifiButton;
+    /** 外部应用卡片：已添加的应用行、添加按钮和返回按钮授权。 */
+    private LinearLayout appList;
+    private Button addAppButton;
+    private Button appOverlayButton;
     private Button closeButton;
     private Button startButton;
     private TextView setupHint;
@@ -407,6 +412,9 @@ final class SettingsPanel extends FrameLayout {
         batteryButton.setVisibility(host.batteryExempt() ? GONE : VISIBLE);
         overlayButton.setVisibility(s.deviceOwner || host.overlayGranted() ? GONE : VISIBLE);
         wifiButton.setVisibility(host.wifiGranted() ? GONE : VISIBLE);
+        if (appOverlayButton != null) {
+            appOverlayButton.setVisibility(c.externalApps.isEmpty() || host.overlayGranted() ? GONE : VISIBLE);
+        }
         if (micButton != null) {
             micButton.setVisibility(hub.config().assistEnabled && !host.micGranted() ? VISIBLE : GONE);
         }
@@ -499,6 +507,20 @@ final class SettingsPanel extends FrameLayout {
         section(context, context.getString(R.string.section_sound), R.string.help_sound);
         // 媒体音量 0–100
         percent(context, ConfigForm.VOLUME, context.getString(R.string.volume), 0, 100);
+
+        section(context, context.getString(R.string.section_apps), R.string.help_apps);
+        TextView appsHint = text(context, context.getString(R.string.apps_hint), 13, MUTED, false);
+        appsHint.setLineSpacing(dp(3), 1f);
+        appsHint.setPadding(dp(2), dp(4), dp(2), dp(4));
+        currentCard.addView(appsHint, fullWidth());
+        appList = new LinearLayout(context);
+        appList.setOrientation(LinearLayout.VERTICAL);
+        currentCard.addView(appList, fullWidth());
+        addAppButton = button(context, context.getString(R.string.apps_add), this::chooseApp, true);
+        currentCard.addView(addAppButton, fullWidth());
+        appOverlayButton = button(context, context.getString(R.string.apps_allow_return), host::requestOverlayPermission, false);
+        currentCard.addView(appOverlayButton, fullWidth());
+        renderApps();
 
         section(context, context.getString(R.string.section_assist), R.string.help_assist);
         assistSwitch = toggle(context, context.getString(R.string.assist_switch));
@@ -719,6 +741,7 @@ final class SettingsPanel extends FrameLayout {
         if (assistSwitch != null) assistSwitch.setChecked(c.assistEnabled);
         filling = false;
         resetPinDraft();
+        renderApps();
     }
 
     /** 离开输入框或拨动开关时校验并保存；MQTT 草稿不在这里写入。无效内容只标在输入框上。 */
@@ -765,6 +788,8 @@ final class SettingsPanel extends FrameLayout {
             }
             Map<String, String> savedText = ConfigForm.toText(saved);
             for (String key : MQTT_KEYS) text.put(key, savedText.get(key));
+            // 外部应用不在表单输入里，由卡片上的添加和移除直接保存
+            text.put(ConfigForm.EXTERNAL_APPS, savedText.get(ConfigForm.EXTERNAL_APPS));
         }
         boolean mqttEnabled = mqttDraft ? mqttSwitch.isChecked() : saved.mqttEnabled;
         ConfigForm.Result result = ConfigForm.parse(text,
@@ -1524,6 +1549,162 @@ final class SettingsPanel extends FrameLayout {
                 }
             });
         }, "ha-discovery").start();
+    }
+
+    /** 按已保存的列表重画外部应用行。卸载掉的应用标成未安装，仍可移除。 */
+    private void renderApps() {
+        if (appList == null) return;
+        Context context = ui == null ? getContext() : ui;
+        List<String> saved = hub.config().externalApps;
+        appList.removeAllViews();
+        if (saved.isEmpty()) {
+            TextView none = text(context, context.getString(R.string.apps_none), 14, MUTED, false);
+            none.setLineSpacing(dp(3), 1f);
+            none.setPadding(dp(2), dp(8), dp(2), dp(8));
+            appList.addView(none, fullWidth());
+        }
+        for (String pkg : saved) appList.addView(appRow(context, pkg), fullWidth());
+        if (addAppButton != null) addAppButton.setAlpha(saved.size() < ExternalApps.MAX ? 1f : 0.5f);
+        if (appOverlayButton != null) {
+            appOverlayButton.setVisibility(saved.isEmpty() || host.overlayGranted() ? GONE : VISIBLE);
+        }
+    }
+
+    /** 一行已添加的应用：上面是图标、名称和移除按钮，下面是包名。包名可以长按复制，给 MQTT 或局域网命令用。 */
+    private View appRow(Context context, String pkg) {
+        AppLauncher.Entry entry = AppLauncher.describe(getContext(), pkg);
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12), dp(10), dp(10), dp(10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(14));
+        bg.setColor(FIELD);
+        box.setBackground(bg);
+        LinearLayout head = new LinearLayout(context);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView icon = new ImageView(context);
+        if (entry != null) icon.setImageDrawable(entry.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        head.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        String label = entry != null ? entry.label : context.getString(R.string.apps_missing);
+        TextView name = text(context, label, 15, entry != null ? TEXT : FAIL_COLOR, true);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setPadding(dp(12), 0, dp(8), 0);
+        head.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button remove = button(context, context.getString(R.string.apps_remove), () -> removeApp(pkg), false);
+        remove.setMinHeight(dp(38));
+        remove.setMinimumHeight(dp(38));
+        remove.setMinWidth(0);
+        remove.setMinimumWidth(0);
+        remove.setPadding(dp(12), 0, dp(12), 0);
+        remove.setTextSize(14);
+        head.addView(remove);
+        box.addView(head);
+        TextView packageName = text(context, pkg, 12, MUTED, false);
+        packageName.setTextIsSelectable(true);
+        packageName.setPadding(dp(2), dp(6), 0, 0);
+        box.addView(packageName);
+        return box;
+    }
+
+    /** 把应用加到应用栏末尾并立即保存。 */
+    private void addApp(String pkg) {
+        KioskConfig current = hub.config();
+        List<String> next = ExternalApps.add(current.externalApps, pkg);
+        if (next.equals(current.externalApps)) return;
+        KioskConfig.Builder builder = current.toBuilder();
+        builder.externalApps = next;
+        hub.updateConfig(builder.build());
+        Log.i(KioskApp.LOG, "External app added: " + pkg);
+        scroll.keepPosition();
+        renderApps();
+    }
+
+    /** 从应用栏移除并立即保存。 */
+    private void removeApp(String pkg) {
+        KioskConfig current = hub.config();
+        List<String> next = ExternalApps.remove(current.externalApps, pkg);
+        if (next.equals(current.externalApps)) return;
+        KioskConfig.Builder builder = current.toBuilder();
+        builder.externalApps = next;
+        hub.updateConfig(builder.build());
+        Log.i(KioskApp.LOG, "External app removed: " + pkg);
+        scroll.keepPosition();
+        renderApps();
+    }
+
+    /** 列出桌面上能打开、还没加过的应用，点一项就加入应用栏。 */
+    private void chooseApp() {
+        Context context = ui == null ? getContext() : ui;
+        if (hub.config().externalApps.size() >= ExternalApps.MAX) {
+            Toast.makeText(getContext(), context.getString(R.string.apps_full, ExternalApps.MAX), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Dialog dialog = new Dialog(getContext());
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, pad, pad, pad);
+        box.addView(text(context, context.getString(R.string.apps_pick_title), 18, TEXT, true), fullWidth());
+        TextView status = text(context, context.getString(R.string.apps_pick_loading), 14, MUTED, false);
+        status.setPadding(0, dp(8), 0, dp(4));
+        box.addView(status, fullWidth());
+        LinearLayout list = new LinearLayout(context);
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView choices = new ScrollView(context);
+        choices.addView(list);
+        box.addView(choices, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(360)));
+        box.addView(button(context, context.getString(R.string.close), dialog::dismiss, false), fullWidth());
+        dialog.setContentView(box);
+        dialog.show();
+        Context appContext = getContext().getApplicationContext();
+        new Thread(() -> {
+            List<AppLauncher.Entry> installed = AppLauncher.installed(appContext);
+            post(() -> {
+                if (!dialog.isShowing()) return;
+                List<String> added = hub.config().externalApps;
+                list.removeAllViews();
+                int shown = 0;
+                for (AppLauncher.Entry entry : installed) {
+                    if (added.contains(entry.packageName)) continue;
+                    list.addView(pickRow(context, entry, () -> {
+                        addApp(entry.packageName);
+                        dialog.dismiss();
+                    }), fullWidth());
+                    shown++;
+                }
+                status.setText(shown == 0 ? R.string.apps_pick_empty : R.string.apps_pick_hint);
+            });
+        }, "app-list").start();
+    }
+
+    /** 选择框里的一行：图标加名称，整行可点。 */
+    private View pickRow(Context context, AppLauncher.Entry entry, Runnable action) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(8), dp(12), dp(8));
+        row.setMinimumHeight(dp(52));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(14));
+        bg.setColor(Color.WHITE);
+        bg.setStroke(dp(1), LINE);
+        row.setBackground(bg);
+        ImageView icon = new ImageView(context);
+        icon.setImageDrawable(entry.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        LinearLayout names = new LinearLayout(context);
+        names.setOrientation(LinearLayout.VERTICAL);
+        names.setPadding(dp(12), 0, 0, 0);
+        names.addView(text(context, entry.label, 15, TEXT, true));
+        names.addView(text(context, entry.packageName, 12, MUTED, false));
+        row.addView(names, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.setClickable(true);
+        row.setOnClickListener(v -> action.run());
+        return row;
     }
 
     /** 打开仪表盘选择。令牌只保存在本机。 */

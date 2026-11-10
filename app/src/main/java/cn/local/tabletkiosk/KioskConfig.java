@@ -1,5 +1,7 @@
 package cn.local.tabletkiosk;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /** 应用全部可配置参数的只读快照；默认值只用于首次启动。 */
@@ -54,6 +56,8 @@ public final class KioskConfig {
     public final int wakeSensitivity;
     /** 唤醒后一直没有说话时自动取消，单位秒。 */
     public final int speechWaitSeconds;
+    /** 右侧应用栏里的外部应用包名，按显示顺序，不可修改。空列表表示不启用右边缘。 */
+    public final List<String> externalApps;
 
     /** 由构建器生成配置，空字符串统一转为非 null。 */
     private KioskConfig(Builder b) {
@@ -99,6 +103,7 @@ public final class KioskConfig {
         assistEnabled = b.assistEnabled;
         wakeSensitivity = b.wakeSensitivity;
         speechWaitSeconds = b.speechWaitSeconds;
+        externalApps = ExternalApps.copyOf(b.externalApps);
     }
 
     /** 返回首次启动使用的默认配置。 */
@@ -151,6 +156,7 @@ public final class KioskConfig {
         b.assistEnabled = assistEnabled;
         b.wakeSensitivity = wakeSensitivity;
         b.speechWaitSeconds = speechWaitSeconds;
+        b.externalApps = externalApps;
         return b;
     }
 
@@ -193,6 +199,7 @@ public final class KioskConfig {
                 && sleepEndHour == c.sleepEndHour && volume == c.volume && watchdogSeconds == c.watchdogSeconds
                 && assistEnabled == c.assistEnabled && wakeSensitivity == c.wakeSensitivity
                 && speechWaitSeconds == c.speechWaitSeconds
+                && externalApps.equals(c.externalApps)
                 && settingsPin.equals(c.settingsPin)
                 && homeUrl.equals(c.homeUrl) && sameMqttConnection(c) && sameLanServer(c);
     }
@@ -205,7 +212,8 @@ public final class KioskConfig {
                 mqttPort, mqttUsername, mqttBaseTopic, mqttDiscoveryPrefix, mqttStateIntervalSeconds, lanEnabled,
                 lanPort, lockTaskEnabled, scheduleEnabled, dayStartHour, nightStartHour, dayBrightness,
                 nightBrightness, dailyReloadEnabled, dailyReloadHour, dailyReloadMinute, sleepEnabled,
-                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds, assistEnabled, wakeSensitivity, speechWaitSeconds);
+                sleepStartHour, sleepEndHour, volume, settingsPin, watchdogSeconds, assistEnabled, wakeSensitivity, speechWaitSeconds,
+                externalApps);
     }
 
     /** 可变构建器，字段初值即首次启动的默认值。 */
@@ -256,6 +264,8 @@ public final class KioskConfig {
         public boolean assistEnabled = false;
         public int wakeSensitivity = 50;
         public int speechWaitSeconds = 5;
+        /** 默认没有外部应用，右边缘仍交给网页。 */
+        public List<String> externalApps = Collections.emptyList();
 
         /** 生成不可变配置。 */
         public KioskConfig build() {

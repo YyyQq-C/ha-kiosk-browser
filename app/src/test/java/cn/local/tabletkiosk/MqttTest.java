@@ -21,7 +21,7 @@ public class MqttTest {
             "按时间切换亮度", "白天亮度", "夜间亮度", "本机地址", "应用版本", "设备型号", "系统版本",
             "媒体音量", "播放音频", "每天刷新", "每天刷新的小时", "每天刷新的分钟", "夜间熄屏", "熄屏开始", "熄屏结束",
             "页面看门狗", "Wi-Fi 名称", "Wi-Fi 信号",
-            "CPU", "内存", "内存不足", "存储", "应用内存", "电池温度");
+            "CPU", "内存", "内存不足", "存储", "应用内存", "电池温度", "打开应用", "回到面板");
 
     /** 主题格式。 */
     @Test
@@ -51,6 +51,22 @@ public class MqttTest {
         assertEquals(MqttCommands.Type.NONE, MqttCommands.parse(topics, "other/topic", "PRESS").type);
         assertEquals(MqttCommands.Type.NONE,
                 MqttCommands.parse(topics, topics.command(MqttTopics.CMD_BRIGHTNESS), "abc").type);
+    }
+
+    /** 打开外部应用只接受包名；回到面板是按钮。 */
+    @Test
+    public void parsesAppCommands() {
+        MqttCommands.Command app = MqttCommands.parse(topics, topics.command(MqttTopics.CMD_APP), " com.spotify.music ");
+        assertEquals(MqttCommands.Type.APP, app.type);
+        assertEquals("com.spotify.music", app.text);
+        assertEquals(MqttCommands.Type.NONE,
+                MqttCommands.parse(topics, topics.command(MqttTopics.CMD_APP), "Spotify").type);
+        assertEquals(MqttCommands.Type.NONE,
+                MqttCommands.parse(topics, topics.command(MqttTopics.CMD_APP), "").type);
+        assertEquals(MqttCommands.Type.NONE,
+                MqttCommands.parse(topics, topics.command(MqttTopics.CMD_APP), "spotify:track:1").type);
+        assertEquals(MqttCommands.Type.PANEL,
+                MqttCommands.parse(topics, topics.command(MqttTopics.CMD_PANEL), "PRESS").type);
     }
 
     /** 亮度范围：0 按 1 处理，越界和非数字拒绝。 */
@@ -112,6 +128,7 @@ public class MqttTest {
             "sensor/kiosk_ab12cd34/charge_state", "sensor/kiosk_ab12cd34/brightness",
             "number/kiosk_ab12cd34/watch_brightness", "sensor/kiosk_ab12cd34/url",
             "button/kiosk_ab12cd34/reload", "button/kiosk_ab12cd34/wake",
+            "text/kiosk_ab12cd34/app_command", "button/kiosk_ab12cd34/panel",
         };
         for (String e : expected) assertTrue(e, seen.contains("homeassistant/" + e + "/config"));
         for (MqttDiscovery.Message m : messages) {
@@ -122,6 +139,11 @@ public class MqttTest {
         }
         assertTrue(payloadOf(messages, "homeassistant/binary_sensor/kiosk_ab12cd34/screen_on/config")
                 .contains("\"name\":\"亮屏\""));
+        String app = payloadOf(messages, "homeassistant/text/kiosk_ab12cd34/app_command/config");
+        assertTrue(app.contains("\"command_topic\":\"home_kiosk/kiosk_ab12cd34/cmd/app\""));
+        assertTrue(app.contains("\"name\":\"打开应用\""));
+        String panel = payloadOf(messages, "homeassistant/button/kiosk_ab12cd34/panel/config");
+        assertTrue(panel.contains("\"command_topic\":\"home_kiosk/kiosk_ab12cd34/cmd/panel\""));
     }
 
     /** 不是设备所有者时用空保留消息删除重启按钮；是时发布。 */

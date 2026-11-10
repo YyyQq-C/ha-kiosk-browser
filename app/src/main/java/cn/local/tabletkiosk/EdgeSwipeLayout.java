@@ -7,12 +7,13 @@ import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 包住网页的容器：从左边缘起手的手势不交给网页，向右滑够距离时打开设置；
- * 几乎没有移动的轻点会原样还给网页，避免左侧按钮点不动。
+ * 设了外部应用时右边缘同理，向左滑够距离时打开应用栏。
+ * 几乎没有移动的轻点会原样还给网页，避免边缘的按钮点不动。
  */
 public final class EdgeSwipeLayout extends FrameLayout {
     /** 手势回调。 */
@@ -22,6 +23,9 @@ public final class EdgeSwipeLayout extends FrameLayout {
 
         /** 左边缘滑出设置。 */
         void onOpenSettings();
+
+        /** 右边缘滑出应用栏。 */
+        void onOpenApps();
     }
 
     private static final int EDGE_DP = 24;
@@ -33,10 +37,11 @@ public final class EdgeSwipeLayout extends FrameLayout {
     private final int edgeWidthPx;
     private final int exclusionHeightPx;
     private final Rect exclusionRect = new Rect();
-    private final List<Rect> exclusionRects = Collections.singletonList(exclusionRect);
+    private final Rect rightExclusionRect = new Rect();
     private Listener listener;
     private View tapTarget;
     private boolean edgeEnabled = true;
+    private boolean rightEnabled;
     private boolean replaying;
 
     /** 按屏幕密度换算手势阈值。 */
@@ -62,6 +67,14 @@ public final class EdgeSwipeLayout extends FrameLayout {
     public void setEdgeEnabled(boolean enabled) {
         edgeEnabled = enabled;
         if (!enabled) swipe.cancel();
+    }
+
+    /** 有外部应用时才认右边缘，否则右侧手势全部交给网页。 */
+    public void setRightEdgeEnabled(boolean enabled) {
+        if (rightEnabled == enabled) return;
+        rightEnabled = enabled;
+        swipe.setRightEdge(enabled ? getWidth() : 0);
+        updateExclusion(getWidth(), getHeight());
     }
 
     /** 每次按下都通知外部有人操作，再按常规流程分发。 */
@@ -92,7 +105,8 @@ public final class EdgeSwipeLayout extends FrameLayout {
                 return true;
             case MotionEvent.ACTION_UP:
                 EdgeSwipe.Result result = swipe.onUp(ev.getX(), ev.getY());
-                if (result == EdgeSwipe.Result.OPEN && listener != null) listener.onOpenSettings();
+                if (result == EdgeSwipe.Result.OPEN_LEFT && listener != null) listener.onOpenSettings();
+                else if (result == EdgeSwipe.Result.OPEN_RIGHT && listener != null) listener.onOpenApps();
                 else if (result == EdgeSwipe.Result.TAP) replayTap(swipe.downX(), swipe.downY());
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -103,16 +117,28 @@ public final class EdgeSwipeLayout extends FrameLayout {
         }
     }
 
-    /** 在左边缘中段排除系统返回手势，让边缘滑动能到达本应用。 */
+    /** 在边缘中段排除系统返回手势，让边缘滑动能到达本应用。 */
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
         if (!changed) return;
-        int height = bottom - top;
+        if (rightEnabled) swipe.setRightEdge(right - left);
+        updateExclusion(right - left, bottom - top);
+    }
+
+    /** 左边缘总是排除；右边缘只在开启应用栏时排除。 */
+    private void updateExclusion(int width, int height) {
+        if (width <= 0 || height <= 0) return;
         int span = Math.min(exclusionHeightPx, height);
         int start = (height - span) / 2;
         exclusionRect.set(0, start, edgeWidthPx, start + span);
-        setSystemGestureExclusionRects(exclusionRects);
+        List<Rect> rects = new ArrayList<>(2);
+        rects.add(exclusionRect);
+        if (rightEnabled) {
+            rightExclusionRect.set(width - edgeWidthPx, start, width, start + span);
+            rects.add(rightExclusionRect);
+        }
+        setSystemGestureExclusionRects(rects);
     }
 
     /** 把边缘轻点按手指输入重新发给网页。 */

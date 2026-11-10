@@ -37,6 +37,8 @@ public final class ConfigForm {
     public static final String WATCHDOG_SECONDS = "watchdog_seconds";
     public static final String WAKE_SENSITIVITY = "wake_sensitivity";
     public static final String SPEECH_WAIT_SECONDS = "speech_wait_seconds";
+    /** 外部应用包名，逗号分隔。不是用户手输的文字，非法项直接丢掉，不报错。 */
+    public static final String EXTERNAL_APPS = "external_apps";
 
     public static final int MIN_LAN_PASSWORD_LENGTH = 8;
     /** 校验失败时写入 errors 的稳定代码，界面按系统语言翻译。 */
@@ -199,6 +201,8 @@ public final class ConfigForm {
         // 兼容旧设置文件：没有新增字段时使用默认 5 秒。
         if (!text.containsKey(SPEECH_WAIT_SECONDS)) text.put(SPEECH_WAIT_SECONDS, "5");
         b.speechWaitSeconds = number(text, SPEECH_WAIT_SECONDS, 1, 120, errors);
+        // 旧设置文件没有这一项时为空列表
+        b.externalApps = ExternalApps.parse(raw(text, EXTERNAL_APPS));
         return errors.isEmpty() ? new Result(b.build(), errors) : new Result(null, errors);
     }
 
@@ -249,6 +253,7 @@ public final class ConfigForm {
         m.put(WATCHDOG_SECONDS, Integer.toString(c.watchdogSeconds));
         m.put(WAKE_SENSITIVITY, Integer.toString(c.wakeSensitivity));
         m.put(SPEECH_WAIT_SECONDS, Integer.toString(c.speechWaitSeconds));
+        m.put(EXTERNAL_APPS, ExternalApps.join(c.externalApps));
         return m;
     }
 
